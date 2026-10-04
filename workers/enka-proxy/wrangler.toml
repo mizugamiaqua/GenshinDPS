@@ -1,0 +1,7 @@
+name = "genshin-dps-enka-proxy"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+# 公開サイトのオリジンだけ許可する場合はカンマ区切りで指定（例: "https://mizugamiaqua.github.io"）
+ALLOWED_ORIGINS = ""

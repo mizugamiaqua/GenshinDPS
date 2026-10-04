@@ -124,7 +124,7 @@ main { max-width: 1320px; margin: 0 auto; padding: 20px 16px 40px; }
 .group-title { display: flex; align-items: center; gap: 12px; margin-top: 8px; font-size: 1rem; color: var(--muted); }
 
 /* form */
-input[type="text"], input[type="number"], select, textarea {
+input[type="text"], input[type="number"], input[type="url"], select, textarea {
   font: inherit;
   color: var(--text);
   background: var(--bg-soft);
@@ -360,3 +360,6 @@ details.help ol { margin: 6px 0; padding-left: 1.4em; color: var(--muted); font-
   .form-grid { grid-template-columns: 1fr 1fr; }
   .kpi-value { font-size: 1.8rem; }
 }
+
+.proxy-input { flex: 1; min-width: 240px; }
+code { background: var(--bg-soft); padding: 1px 6px; border-radius: 4px; font-size: 0.85em; word-break: break-all; }

@@ -1,6 +1,7 @@
 import { h, $, clear, fmt, pct, sec, toast, img } from './dom.js';
 import { store, buildId } from './store.js';
-import { ENKA_ERRORS, isValidUid, parseEnkaResponse } from './core/enka.js';
+import { isValidUid, parseEnkaResponse } from './core/enka.js';
+import { fetchEnkaData } from './enkaClient.js';
 import { createEngine, normalizeSettings } from './core/engine.js';
 import { evaluateCombo, recommendCombo } from './core/rotation.js';
 import { REACTIONS, reactionApplies } from './core/damage.js';
@@ -138,19 +139,16 @@ function charCard(build, { selectable = false, actions = null } = {}) {
 // ---------------------------------------------------------------------------
 // 読み込み画面
 // ---------------------------------------------------------------------------
+// サイト設定（config.js）とユーザー設定のプロキシURL
+const siteConfig = window.GENSHIN_DPS_CONFIG ?? {};
+const proxyUrl = () => store.proxyUrl || siteConfig.enkaProxy || '';
+
 async function fetchUid(uid) {
-  const res = await fetch(`api/enka/${uid}`);
-  let body = null;
-  try {
-    body = await res.json();
-  } catch {
-    // noop
-  }
-  if (!res.ok) {
-    const msg = ENKA_ERRORS[res.status] ?? body?.error ?? `取得に失敗しました（HTTP ${res.status}）`;
-    throw new Error(msg);
-  }
-  return body;
+  const { json } = await fetchEnkaData(uid, {
+    proxy: proxyUrl(),
+    sameOrigin: siteConfig.sameOriginApi !== false,
+  });
+  return json;
 }
 
 async function loadUid(uid) {
@@ -194,6 +192,32 @@ function registerSelected(goCalc = false) {
   location.hash = goCalc && chars.length === 1 ? `#/calc/${encodeURIComponent(lastId)}` : '#/roster';
 }
 
+function connectionSettings() {
+  const input = h('input', { type: 'url', class: 'proxy-input', placeholder: 'https://enka-proxy.example.workers.dev', value: store.proxyUrl ?? '' });
+  const current = proxyUrl();
+  return h('details', { class: 'help', open: !!ui.connectionOpen, ontoggle: (e) => { ui.connectionOpen = e.target.open; } },
+    h('summary', {}, '接続設定（GitHub Pages などで公開している場合）'),
+    h('p', { class: 'muted small' },
+      'GitHub Pages のような静的ホスティングでは Enka.Network を直接呼べないため、CORS対応のプロキシ（リポジトリ同梱の Cloudflare Worker など）のURLを指定します。',
+      'npm start で起動している場合は設定不要です。'),
+    h('p', { class: 'small' }, '現在のプロキシ: ', h('code', {}, current || '未設定'),
+      siteConfig.enkaProxy && !store.proxyUrl ? h('span', { class: 'muted' }, '（サイト既定）') : null),
+    h('div', { class: 'inline-form' },
+      input,
+      h('button', {
+        class: 'btn btn-small', onclick: () => {
+          const v = input.value.trim();
+          if (v && !/^https?:\/\//.test(v)) {
+            toast('http(s):// から始まるURLを入力してください。', 'error');
+            return;
+          }
+          store.proxyUrl = v;
+          toast(v ? 'プロキシURLを保存しました。' : 'プロキシURLをクリアしました。', 'success');
+          renderImport();
+        },
+      }, '保存')));
+}
+
 function renderImport() {
   const root = clear(document.getElementById('view-import'));
   const input = h('input', {
@@ -230,6 +254,7 @@ function renderImport() {
             }
           },
         }, 'JSONを読み込む')),
+      connectionSettings(),
     ),
   );
 
