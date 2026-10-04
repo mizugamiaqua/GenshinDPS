@@ -2,15 +2,22 @@
 
 UID を入力するだけで、プロフィールの「キャラクターラインナップ」からキャラのレベル・天賦・武器・聖遺物を自動取得し、
 通常攻撃・元素スキル・元素爆発を組み合わせたコンボの DPS を計算する Web アプリです。
-推奨コンボの自動生成にも対応しています。
+推奨コンボの自動生成、4人チームのローテーションDPS計算にも対応しています。
+
+## 🔗 サイトはこちら
+
+### **[https://mizugamiaqua.github.io/GenshinDPS/](https://mizugamiaqua.github.io/GenshinDPS/)**
+
+インストール不要・ブラウザだけで使えます（PC・スマホ対応）。
+
+| ページ | リンク |
+| --- | --- |
+| UIDから読み込み | [https://mizugamiaqua.github.io/GenshinDPS/#/import](https://mizugamiaqua.github.io/GenshinDPS/#/import) |
+| 登録キャラ | [https://mizugamiaqua.github.io/GenshinDPS/#/roster](https://mizugamiaqua.github.io/GenshinDPS/#/roster) |
+| DPS計算 | [https://mizugamiaqua.github.io/GenshinDPS/#/calc](https://mizugamiaqua.github.io/GenshinDPS/#/calc) |
+| チームDPS | [https://mizugamiaqua.github.io/GenshinDPS/#/team](https://mizugamiaqua.github.io/GenshinDPS/#/team) |
 
 ## 使い方
-
-```bash
-npm install        # データ生成用（genshin-db）。起動だけなら不要
-npm start          # http://localhost:3000
-npm test           # テスト
-```
 
 1. **UIDから読み込み** — UID を入力するとキャラ詳細を取得します（ゲーム内で「キャラ詳細を表示」をONにしたキャラのみ）。
 2. **登録** — 計算したいキャラを選んで登録します。ブラウザ（localStorage）に保存され、「最新に更新」で再取得できます。
@@ -27,6 +34,14 @@ npm test           # テスト
    - メンバーごとの反応（蒸発など）、コンボの回数・時間は個別に調整可能
 5. **推奨コンボ** — 元素スキル（CDが許す回数）→ 元素爆発 → 特殊状態中の攻撃 → 残り時間を最もDPS効率の良い
    通常攻撃パターンで埋める、という方針で自動生成します。パターン比較も表示します。
+
+## ローカルで動かす（開発者向け）
+
+```bash
+npm install        # データ生成用（genshin-db）。起動だけなら不要
+npm start          # http://localhost:3000
+npm test           # テスト
+```
 
 ## GitHub Pages で公開する（GitHub だけで完結）
 
