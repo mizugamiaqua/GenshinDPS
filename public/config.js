@@ -1,8 +1,7 @@
-// サイト設定。GitHub Pages へのデプロイ時は Actions がこのファイルを上書きします
-// （リポジトリ変数 ENKA_PROXY_URL が設定されていれば enkaProxy に入ります）。
+// サイト設定。GitHub Pages へのデプロイ時は Actions がこのファイルを上書きします。
 window.GENSHIN_DPS_CONFIG = {
-  // Enka.Network 用 CORS プロキシのURL（例: https://enka-proxy.example.workers.dev）
-  enkaProxy: '',
-  // 同一オリジンの /api/enka を使うか（server.js で起動している場合）
+  // 同一オリジンの /api/enka を使うか（npm start で server.js を起動している場合）
   sameOriginApi: true,
+  // Enka データの保存先リポジトリ（"owner/repo"）。空なら github.io のURLから自動判定
+  github: { repo: '', branch: 'enka-data' },
 };

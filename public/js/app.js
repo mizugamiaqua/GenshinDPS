@@ -1,7 +1,7 @@
 import { h, $, clear, fmt, pct, sec, toast, img } from './dom.js';
 import { store, buildId } from './store.js';
 import { isValidUid, parseEnkaResponse } from './core/enka.js';
-import { fetchEnkaData } from './enkaClient.js';
+import { ENKA_API, fetchEnkaData, githubConfig, issueUrl, waitForGitHub } from './enkaClient.js';
 import { createEngine, normalizeSettings } from './core/engine.js';
 import { evaluateCombo, recommendCombo } from './core/rotation.js';
 import { REACTIONS, reactionApplies } from './core/damage.js';
@@ -139,16 +139,21 @@ function charCard(build, { selectable = false, actions = null } = {}) {
 // ---------------------------------------------------------------------------
 // 読み込み画面
 // ---------------------------------------------------------------------------
-// サイト設定（config.js）とユーザー設定のプロキシURL
+// サイト設定（config.js）。GitHub Pages では保存先リポジトリをURLから自動判定する
 const siteConfig = window.GENSHIN_DPS_CONFIG ?? {};
-const proxyUrl = () => store.proxyUrl || siteConfig.enkaProxy || '';
+const gh = githubConfig(siteConfig);
 
 async function fetchUid(uid) {
-  const { json } = await fetchEnkaData(uid, {
-    proxy: proxyUrl(),
-    sameOrigin: siteConfig.sameOriginApi !== false,
-  });
-  return json;
+  return fetchEnkaData(uid, { sameOrigin: siteConfig.sameOriginApi !== false, github: gh });
+}
+
+function timeAgo(iso) {
+  if (!iso) return '';
+  const min = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (min < 1) return 'たった今';
+  if (min < 60) return `${min}分前`;
+  if (min < 60 * 24) return `${Math.round(min / 60)}時間前`;
+  return `${Math.round(min / 60 / 24)}日前`;
 }
 
 async function loadUid(uid) {
@@ -157,27 +162,114 @@ async function loadUid(uid) {
     toast('UIDは9〜10桁の数字で入力してください。', 'error');
     return;
   }
+  stopWaiting();
   ui.loading = true;
+  ui.importError = null;
+  ui.request = null;
+  store.lastUid = uid;
   renderImport();
   try {
-    const json = await fetchUid(uid);
-    applyImport(json, uid);
-    store.lastUid = uid;
+    const r = await fetchUid(uid);
+    applyImport(r.json, uid, r);
   } catch (err) {
-    ui.importResult = { error: err.message };
+    ui.importResult = null;
+    if (err.code === 'not-cached' || err.code === 'unavailable') {
+      ui.request = { uid, lastError: err.lastError ?? null, reason: err.code };
+    } else {
+      ui.importError = err.message;
+    }
   } finally {
     ui.loading = false;
     renderImport();
   }
 }
 
-function applyImport(json, uid = null) {
+function applyImport(json, uid = null, source = null) {
   const result = parseEnkaResponse({ uid, ...json }, db);
   ui.importResult = result;
+  ui.importSource = source ? { via: source.via, fetchedAt: source.fetchedAt ?? null } : { via: 'paste' };
+  ui.importError = null;
   ui.selected = new Set(result.characters.filter((c) => c.supported).map(buildId));
   if (!result.characters.length) {
-    ui.importResult.warning = 'キャラクター詳細が公開されていません。ゲーム内のプロフィールで「キャラクターラインナップ」にキャラを設定し、「キャラ詳細を表示」をONにしてください。';
+    ui.importResult.warning = 'キャラクター詳細が公開されていません。ゲーム内のプロフィールで「キャラクターラインナップ」にキャラを設定し、「キャラ詳細を表示」をONにしてから、もう一度取得してください。';
   }
+}
+
+// --- GitHub Actions への取得依頼 ---
+function stopWaiting() {
+  ui.waiting?.controller.abort();
+  ui.waiting = null;
+}
+
+async function requestViaGitHub(uid) {
+  stopWaiting();
+  window.open(issueUrl(uid, gh), '_blank', 'noopener');
+  const controller = new AbortController();
+  ui.waiting = { uid, since: new Date().toISOString(), controller };
+  renderImport();
+  try {
+    const r = await waitForGitHub(uid, gh, ui.waiting.since, {
+      signal: controller.signal,
+      onTick: (n, elapsed) => {
+        const el = document.getElementById('wait-elapsed');
+        if (el) el.textContent = `${Math.floor(elapsed / 60000)}:${String(Math.floor(elapsed / 1000) % 60).padStart(2, '0')}`;
+      },
+    });
+    ui.waiting = null;
+    ui.request = null;
+    applyImport(r.json, uid, r);
+    toast('GitHub Actions からデータを受け取りました。', 'success');
+  } catch (err) {
+    if (err.code === 'cancelled') return;
+    ui.waiting = null;
+    ui.importError = err.message;
+  }
+  renderImport();
+}
+
+function pasteImport(text, uid) {
+  try {
+    applyImport(JSON.parse(text), uid);
+    ui.request = null;
+    stopWaiting();
+    renderImport();
+  } catch (err) {
+    toast(`JSONを読み込めませんでした: ${err.message}`, 'error');
+  }
+}
+
+/** データ取得の依頼パネル（GitHub Issue 経由 / Enka から手動コピー） */
+function requestPanel(uid, { refresh = false, lastError = null } = {}) {
+  const enkaUrl = `${ENKA_API}/${uid}`;
+  const paste = h('textarea', { rows: 4, placeholder: '{"playerInfo": ..., "avatarInfoList": [...]}', 'aria-label': 'EnkaのJSON' });
+  const waiting = ui.waiting?.uid === uid;
+  return h('div', { class: 'card request-panel' },
+    h('h2', {}, refresh ? `UID ${uid} のデータを最新にする` : `UID ${uid} のデータを取得する`),
+    !refresh && h('p', { class: 'muted' }, 'このUIDのデータはまだサイトに保存されていません。次のどちらかの方法で取得してください。'),
+    lastError && h('div', { class: 'alert alert-error small' }, `前回の取得エラー: ${lastError.message}`),
+    h('div', { class: 'request-options' },
+      gh && h('section', { class: 'request-option' },
+        h('h3', {}, 'A. GitHubで取得を依頼する ', h('span', { class: 'badge-soft' }, 'おすすめ')),
+        h('ol', { class: 'steps' },
+          h('li', {}, '下のボタンを押すと、GitHub の Issue 作成画面が開きます（GitHubアカウントが必要・無料）。'),
+          h('li', {}, 'そのまま「Create」（Submit new issue）を押します。'),
+          h('li', {}, 'GitHub Actions が Enka.Network からデータを取得し、1分ほどでこの画面に自動で読み込まれます。')),
+        waiting
+          ? h('div', { class: 'waiting' },
+            h('span', { class: 'spinner', 'aria-hidden': 'true' }),
+            h('span', {}, 'GitHub Actions の処理を待っています… ', h('span', { id: 'wait-elapsed' }, '0:00')),
+            h('button', { class: 'btn btn-small', onclick: () => { stopWaiting(); renderImport(); } }, 'キャンセル'),
+            h('a', { class: 'small', href: issueUrl(uid, gh), target: '_blank', rel: 'noopener' }, 'Issue画面をもう一度開く'))
+          : h('button', { class: 'btn btn-primary', onclick: () => requestViaGitHub(uid) }, 'GitHubで取得を依頼する')),
+      h('section', { class: 'request-option' },
+        h('h3', {}, `${gh ? 'B' : 'A'}. Enka からコピーして貼り付ける `, h('span', { class: 'badge-soft' }, 'アカウント不要')),
+        h('ol', { class: 'steps' },
+          h('li', {}, h('a', { href: enkaUrl, target: '_blank', rel: 'noopener' }, 'Enka のデータを開く'), '（別タブで文字がたくさん表示されます）'),
+          h('li', {}, '表示された文字をすべてコピーします（PC: Ctrl+A → Ctrl+C ／ スマホ: 長押し → すべて選択 → コピー）。'),
+          h('li', {}, '下の欄に貼り付けて「読み込む」を押します。')),
+        paste,
+        h('button', { class: 'btn', onclick: () => pasteImport(paste.value, uid) }, '読み込む'))),
+  );
 }
 
 function registerSelected(goCalc = false) {
@@ -190,32 +282,6 @@ function registerSelected(goCalc = false) {
   for (const c of chars) lastId = store.saveCharacter(c);
   toast(`${chars.length}体のキャラクターを登録しました。`, 'success');
   location.hash = goCalc && chars.length === 1 ? `#/calc/${encodeURIComponent(lastId)}` : '#/roster';
-}
-
-function connectionSettings() {
-  const input = h('input', { type: 'url', class: 'proxy-input', placeholder: 'https://enka-proxy.example.workers.dev', value: store.proxyUrl ?? '' });
-  const current = proxyUrl();
-  return h('details', { class: 'help', open: !!ui.connectionOpen, ontoggle: (e) => { ui.connectionOpen = e.target.open; } },
-    h('summary', {}, '接続設定（GitHub Pages などで公開している場合）'),
-    h('p', { class: 'muted small' },
-      'GitHub Pages のような静的ホスティングでは Enka.Network を直接呼べないため、CORS対応のプロキシ（リポジトリ同梱の Cloudflare Worker など）のURLを指定します。',
-      'npm start で起動している場合は設定不要です。'),
-    h('p', { class: 'small' }, '現在のプロキシ: ', h('code', {}, current || '未設定'),
-      siteConfig.enkaProxy && !store.proxyUrl ? h('span', { class: 'muted' }, '（サイト既定）') : null),
-    h('div', { class: 'inline-form' },
-      input,
-      h('button', {
-        class: 'btn btn-small', onclick: () => {
-          const v = input.value.trim();
-          if (v && !/^https?:\/\//.test(v)) {
-            toast('http(s):// から始まるURLを入力してください。', 'error');
-            return;
-          }
-          store.proxyUrl = v;
-          toast(v ? 'プロキシURLを保存しました。' : 'プロキシURLをクリアしました。', 'success');
-          renderImport();
-        },
-      }, '保存')));
 }
 
 function renderImport() {
@@ -241,28 +307,27 @@ function renderImport() {
           h('li', {}, '「キャラ詳細を表示」をONにします。'),
           h('li', {}, '反映まで数分かかることがあります。Enka.Network のキャッシュ（数分）が切れてから再度読み込んでください。'))),
       h('details', { class: 'help' },
-        h('summary', {}, 'JSONを直接読み込む（オフライン・API障害時）'),
-        h('p', { class: 'muted' }, 'https://enka.network/api/uid/〈UID〉 で取得したJSONを貼り付けてください。'),
+        h('summary', {}, 'JSONファイル・テキストを直接読み込む'),
+        h('p', { class: 'muted small' }, 'Enka.Network の API（https://enka.network/api/uid/〈UID〉）のJSONを貼り付けてください。'),
         h('textarea', { id: 'json-input', rows: 4, placeholder: '{"playerInfo": ..., "avatarInfoList": [...]}' }),
-        h('button', {
-          class: 'btn', onclick: () => {
-            try {
-              applyImport(JSON.parse($('#json-input').value));
-              renderImport();
-            } catch (err) {
-              toast(`JSONを読み込めませんでした: ${err.message}`, 'error');
-            }
-          },
-        }, 'JSONを読み込む')),
-      connectionSettings(),
+        h('button', { class: 'btn', onclick: () => pasteImport($('#json-input').value, null) }, 'JSONを読み込む')),
     ),
   );
 
+  if (ui.importError) root.append(h('div', { class: 'alert alert-error' }, ui.importError));
+  if (ui.request) {
+    root.append(requestPanel(ui.request.uid, { refresh: ui.request.refresh, lastError: ui.request.lastError }));
+  }
+
   const r = ui.importResult;
   if (!r) return;
-  if (r.error) {
-    root.append(h('div', { class: 'alert alert-error' }, r.error));
-    return;
+  const src = ui.importSource;
+  if (src?.via === 'github' && !ui.request) {
+    root.append(h('div', { class: 'alert source-info' },
+      h('span', {}, `GitHub に保存されたデータを表示しています（最終取得: ${src.fetchedAt ? `${new Date(src.fetchedAt).toLocaleString('ja-JP')}・${timeAgo(src.fetchedAt)}` : '不明'}）。`),
+      r.uid && h('button', {
+        class: 'btn btn-small', onclick: () => { ui.request = { uid: r.uid, refresh: true }; renderImport(); },
+      }, '最新データを取得する')));
   }
   root.append(h('div', { class: 'card player-card' },
     h('div', {},
@@ -292,24 +357,12 @@ function renderImport() {
 // ---------------------------------------------------------------------------
 // 登録キャラ画面
 // ---------------------------------------------------------------------------
-async function refreshCharacter(id) {
+/** 登録済みキャラの再取得: 読み込み画面で同じUIDを読み込み直す（登録すると上書き更新される） */
+function refreshCharacter(id) {
   const build = store.getCharacter(id);
   if (!build?.uid) return;
-  try {
-    toast(`UID ${build.uid} から再取得しています…`);
-    const json = await fetchUid(build.uid);
-    const result = parseEnkaResponse({ uid: build.uid, ...json }, db);
-    const fresh = result.characters.find((c) => buildId(c) === id);
-    if (!fresh) {
-      toast('キャラクターラインナップにこのキャラが見つかりませんでした。', 'error');
-      return;
-    }
-    store.saveCharacter(fresh);
-    toast(`${fresh.nameJa}を最新の状態に更新しました。`, 'success');
-    renderRoster();
-  } catch (err) {
-    toast(err.message, 'error');
-  }
+  location.hash = '#/import';
+  setTimeout(() => loadUid(build.uid), 0);
 }
 
 function renderRoster() {

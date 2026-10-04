@@ -2,7 +2,7 @@
 const KEY = 'genshin-dps:v1';
 
 function empty() {
-  return { characters: {}, settings: {}, combos: {}, lastUid: '', proxyUrl: '' };
+  return { characters: {}, settings: {}, combos: {}, lastUid: '' };
 }
 
 function load() {
@@ -33,13 +33,6 @@ export const store = {
   },
   set lastUid(v) {
     state.lastUid = v;
-    save();
-  },
-  get proxyUrl() {
-    return state.proxyUrl;
-  },
-  set proxyUrl(v) {
-    state.proxyUrl = v;
     save();
   },
   listCharacters() {

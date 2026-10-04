@@ -30,7 +30,7 @@ const enkaCache = new Map();
 export async function fetchEnka(uid, fetchImpl = fetch) {
   const cached = enkaCache.get(uid);
   if (cached && cached.expires > Date.now()) return { status: 200, body: cached.body, cached: true };
-  const res = await fetchImpl(`${ENKA_BASE}/${uid}/`, {
+  const res = await fetchImpl(`${ENKA_BASE}/${uid}`, {
     headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
     signal: AbortSignal.timeout(15000),
   });

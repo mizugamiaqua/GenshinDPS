@@ -361,5 +361,18 @@ details.help ol { margin: 6px 0; padding-left: 1.4em; color: var(--muted); font-
   .kpi-value { font-size: 1.8rem; }
 }
 
-.proxy-input { flex: 1; min-width: 240px; }
 code { background: var(--bg-soft); padding: 1px 6px; border-radius: 4px; font-size: 0.85em; word-break: break-all; }
+
+/* GitHub 取得依頼 */
+.request-panel h2 { font-size: 1.15rem; }
+.request-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin-top: 10px; }
+.request-option { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.request-option h3 { margin: 0; }
+.request-option textarea { width: 100%; }
+.steps { margin: 0; padding-left: 1.3em; font-size: 0.88rem; color: var(--muted); }
+.steps li { margin: 2px 0; }
+.badge-soft { white-space: nowrap; font-size: 0.72rem; font-weight: 600; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 0 8px; vertical-align: middle; }
+.waiting { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.9rem; }
+.spinner { width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.source-info { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 0.9rem; }

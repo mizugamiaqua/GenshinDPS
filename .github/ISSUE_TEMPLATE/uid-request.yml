@@ -1,0 +1,15 @@
+name: UIDデータ取得
+description: Enka.Network からキャラクターデータを取得します（GitHub Actions が自動処理します）
+title: "[UID] "
+labels: [uid-request]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        タイトルの「[UID] 」の後ろに UID を入力して送信してください。1分ほどで自動的に取得され、この Issue は閉じられます。
+        ゲーム内のプロフィールで「キャラ詳細を表示」をONにしておく必要があります。
+  - type: input
+    id: uid
+    attributes:
+      label: UID
+      placeholder: "800000001"

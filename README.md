@@ -21,45 +21,43 @@ npm test           # テスト
 4. **推奨コンボ** — 元素スキル（CDが許す回数）→ 元素爆発 → 特殊状態中の攻撃 → 残り時間を最もDPS効率の良い
    通常攻撃パターンで埋める、という方針で自動生成します。パターン比較も表示します。
 
-## GitHub Pages で公開する
+## GitHub Pages で公開する（GitHub だけで完結）
 
-`public/` は静的ファイルだけで動くので、GitHub Pages で公開できます。
-デフォルトブランチに push すると `.github/workflows/pages.yml` がテスト → デプロイを自動で行います。
+外部サービスの登録は不要で、GitHub Pages + GitHub Actions だけで動きます。
 
-1. **Pages を有効化**: リポジトリの Settings → Pages → Build and deployment の Source を **GitHub Actions** にする
-2. **push する**（または Actions タブから「Test & Deploy to GitHub Pages」を手動実行）
-   → `https://<ユーザー名>.github.io/<リポジトリ名>/` で公開されます
+1. Settings → Pages → Build and deployment の Source を **GitHub Actions** にする
+2. デフォルトブランチに push すると `.github/workflows/pages.yml` がテスト → デプロイを行い、
+   `https://<ユーザー名>.github.io/<リポジトリ名>/` で公開されます
 
-### Enka 用プロキシ（UID読み込みに必要）
+### UID 読み込みの仕組み
 
-GitHub Pages にはサーバーが無く、ブラウザから Enka.Network を直接呼ぶと CORS で拒否されるため、
-UID から読み込むには CORS 対応のプロキシが必要です。リポジトリ同梱の Cloudflare Worker（無料枠で動作）を使えます。
+Enka.Network はブラウザからの直接アクセス（CORS）を許可していないため、GitHub Actions が代わりに取得します。
 
-```bash
-cd workers/enka-proxy
-npx wrangler login
-npx wrangler deploy        # → https://genshin-dps-enka-proxy.<アカウント>.workers.dev
+```
+サイトでUID入力
+  ├─ enka-data ブランチに保存済み → すぐ表示（取得日時を表示、「最新データを取得する」で更新）
+  └─ 未保存 → 「GitHubで取得を依頼する」
+        → タイトル「[UID] 123456789」の Issue 作成画面が開く → 利用者が送信
+        → .github/workflows/enka-fetch.yml が Enka から取得し enka-data ブランチの uid/<UID>.json に保存
+        → Issue に結果をコメントして自動クローズ
+        → サイトが保存を検知して自動で読み込み（通常1分前後）
 ```
 
-デプロイしたURLを次のどちらかで設定します。
-
-- **サイト全体の既定にする**: Settings → Secrets and variables → Actions → Variables に
-  `ENKA_PROXY_URL` を追加して再デプロイ（`public/config.js` に書き込まれます）
-- **自分のブラウザだけで使う**: サイトの「UIDから読み込み」→「接続設定」にURLを入力して保存
-
-`wrangler.toml` の `ALLOWED_ORIGINS` に `https://<ユーザー名>.github.io` を入れると、自分のサイト以外からの利用を防げます。
-プロキシを用意しない場合も、「JSONを直接読み込む」に Enka の JSON を貼り付ければ計算できます。
-
-取得経路は「同一オリジンの `/api/enka`（`npm start` 時）→ 設定したプロキシ → Enka 直接」の順に自動で試します。
+- サイトは保存データを `api.github.com` / `raw.githubusercontent.com`（どちらも CORS 許可）から読みます。
+- Issue での依頼には GitHub アカウント（無料）が必要です。アカウントが無い人は、画面の
+  「Enka からコピーして貼り付ける」（Enka のJSONを別タブで開いてコピペ）で読み込めます。
+- Actions タブの「Fetch Enka data」→「Run workflow」で UID を指定して手動取得もできます。
+- 取得したデータは公開ブランチ `enka-data` に保存されます（Enka.Network 上で公開されている情報と同じ内容です）。
+- `npm start` でローカル起動した場合は、付属サーバーが直接 Enka から取得します。
 
 ## 仕組み
 
 | ファイル | 役割 |
 | --- | --- |
 | `server.js` | 静的配信 + `/api/enka/:uid`（Enka.Network API のプロキシ。CORS回避・User-Agent付与・ttlキャッシュ） |
-| `workers/enka-proxy/` | GitHub Pages 用の Enka プロキシ（Cloudflare Worker） |
 | `.github/workflows/pages.yml` | テストと GitHub Pages へのデプロイ |
-| `public/js/enkaClient.js` | Enka 取得（同一オリジン → プロキシ → 直接 のフォールバック） |
+| `.github/workflows/enka-fetch.yml` + `scripts/enka-fetch.mjs` | Issue をきっかけに Enka からデータを取得し `enka-data` ブランチへ保存 |
+| `public/js/enkaClient.js` | データ取得（同一オリジンAPI → GitHub 保存データ → Issue で取得依頼・完了待ち） |
 | `scripts/build-data.mjs` | genshin-db と Enka store から全キャラの天賦倍率を抽出し `public/data/*.json` を生成（`npm run build:data`） |
 | `public/js/core/talentParser.js` | 天賦ラベル（例 `5-Hit DMG\|{param5:F1P}+{param6:F1P}`）を倍率・参照ステータス・ヒット数に変換 |
 | `public/js/core/enka.js` | Enka レスポンスの正規化（パネルステータス・天賦Lv（凸による+3込み）・武器・聖遺物） |
@@ -76,7 +74,7 @@ npx wrangler deploy        # → https://genshin-dps-enka-proxy.<アカウント
 
 ## 注意・制限
 
-- Enka.Network はブラウザから直接呼べないため、付属のサーバーまたはプロキシ経由で取得します。
+- Enka.Network はブラウザから直接呼べないため、GitHub Actions（公開時）または付属サーバー（ローカル時）経由で取得します。
 - モーション時間は武器種ごとの目安値です。持続ダメージのヒット数はプロファイル未定義のキャラでは1回として扱います（コンボ表で変更可）。
 - 武器パッシブの条件付き効果、命ノ星座（一部を除く）、変化反応・月反応は未対応です（カスタムバフで補正できます）。
 - Lv91 以降の反応係数は暫定値（外挿）です。

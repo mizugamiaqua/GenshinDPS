@@ -1,0 +1,94 @@
+# サイトからの依頼（「[UID] 123456789」というタイトルの Issue）を受けて、
+# Enka.Network からプレイヤーデータを取得し enka-data ブランチに保存する。
+# ブラウザからは Enka を直接呼べない（CORS非対応）ため、GitHub Actions が代わりに取得する。
+name: Fetch Enka data
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      uid:
+        description: 取得するUID
+        required: true
+
+permissions:
+  contents: write
+  issues: write
+
+# enka-data ブランチへの push を直列化
+concurrency:
+  group: enka-data
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[UID]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Prepare enka-data branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch --depth=1 origin enka-data:enka-data 2>/dev/null; then
+            git worktree add enka-data enka-data
+          else
+            git worktree add --orphan -b enka-data enka-data
+            printf '# enka-data\n\nGitHub Actions（Fetch Enka data）が Enka.Network から取得したデータの保存先です。\n' > enka-data/README.md
+          fi
+
+      - name: Fetch from Enka.Network
+        id: fetch
+        env:
+          # Issue のタイトル・本文は外部入力なのでシェルに直接展開しない
+          INPUT_UID: ${{ inputs.uid }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: node scripts/enka-fetch.mjs enka-data
+
+      - name: Commit and push
+        if: steps.fetch.outputs.changed == 'true'
+        env:
+          UID: ${{ steps.fetch.outputs.uid }}
+        run: |
+          cd enka-data
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -q -m "UID ${UID} を更新"
+          for i in 1 2 3 4 5; do
+            git push origin enka-data && exit 0
+            sleep $((i * 2))
+            git pull --rebase -q origin enka-data
+          done
+          exit 1
+
+      - name: Reply to issue
+        if: always() && github.event_name == 'issues'
+        uses: actions/github-script@v7
+        env:
+          OK: ${{ steps.fetch.outputs.ok }}
+          UID: ${{ steps.fetch.outputs.uid }}
+          MESSAGE: ${{ steps.fetch.outputs.message }}
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            const { OK, UID, MESSAGE, JOB_STATUS } = process.env;
+            const ok = OK === 'true' && JOB_STATUS === 'success';
+            const site = `https://${context.repo.owner}.github.io/${context.repo.repo}/`;
+            const body = ok
+              ? `✅ ${MESSAGE}\n\nサイトに戻ると自動で読み込まれます（数十秒ほどかかる場合があります）。\n${site}#/import`
+              : `⚠️ 取得できませんでした: ${MESSAGE || '処理中にエラーが発生しました。'}`;
+            const note = '\n\n<sub>この Issue は自動で閉じられます。取得したデータは公開の enka-data ブランチに保存されます。</sub>';
+            const issue_number = context.issue.number;
+            await github.rest.issues.createComment({ ...context.repo, issue_number, body: body + note });
+            await github.rest.issues.addLabels({ ...context.repo, issue_number, labels: ['uid-request'] }).catch(() => {});
+            await github.rest.issues.update({ ...context.repo, issue_number, state: 'closed', state_reason: ok ? 'completed' : 'not_planned' });
