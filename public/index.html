@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>原神 DPS 計算機</title>
+  <meta name="description" content="UIDを入力するだけでキャラクターの育成状況・聖遺物を自動取得し、スキル・元素爆発・通常攻撃を組み合わせたコンボのDPSを計算します。">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2l4 10 10 4-10 4-4 10-4-10-10-4 10-4z' fill='%23d9b45a'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><path d="M16 2l4 10 10 4-10 4-4 10-4-10-10-4 10-4z" fill="currentColor"/></svg>
+      <span>原神 DPS 計算機</span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab" role="tab" data-view="import">UIDから読み込み</button>
+      <button class="tab" role="tab" data-view="roster">登録キャラ</button>
+      <button class="tab" role="tab" data-view="calc">DPS計算</button>
+    </nav>
+  </header>
+
+  <main id="app">
+    <section id="view-import" class="view" hidden></section>
+    <section id="view-roster" class="view" hidden></section>
+    <section id="view-calc" class="view" hidden></section>
+  </main>
+
+  <footer class="site-footer">
+    <p>キャラクターデータは <a href="https://enka.network/" target="_blank" rel="noopener">Enka.Network</a> から取得しています。
+      天賦倍率は <a href="https://github.com/theBowja/genshin-db" target="_blank" rel="noopener">genshin-db</a> のデータを使用しています。</p>
+    <p>計算結果は目安です。モーション時間・持続ダメージのヒット数・一部の武器効果は概算または手入力になります。</p>
+  </footer>
+
+  <div id="toasts" aria-live="polite"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
