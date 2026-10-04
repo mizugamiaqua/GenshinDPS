@@ -6,8 +6,15 @@ import { db, sample } from './helpers.js';
 
 const require = createRequire(import.meta.url);
 
-test('genshin-db にいる全キャラ（旅人以外）が収録されている', () => {
-  const gdb = require('genshin-db');
+// genshin-db はデータ生成用の devDependency（CI では未インストールなのでスキップ）
+let gdb = null;
+try {
+  gdb = require('genshin-db');
+} catch {
+  // 未インストール
+}
+
+test('genshin-db にいる全キャラ（旅人以外）が収録されている', { skip: !gdb && 'genshin-db 未インストール' }, () => {
   const ids = new Set(Object.values(db.characters).map((c) => c.avatarId));
   const missing = [];
   for (const name of gdb.characters('names', { matchCategories: true })) {
