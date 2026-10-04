@@ -17,6 +17,7 @@ export const DEFAULT_TEAM = Object.freeze({
   name: '',
   members: [null, null, null, null],
   mainIndex: null,
+  mainAuto: true,
   rotationLength: 20,
   enemy: { level: 100, res: 10 },
   reactions: {},
@@ -234,45 +235,77 @@ export function createTeam(inputs, rawTeam) {
   return { team, members, links: linkList };
 }
 
-/** メインアタッカーを推定（サポート扱いでないキャラのうち、単体での推奨DPSが最も高いメンバー） */
-export function guessMain(members) {
+// 役割ごとの並び順（ローテーションの先頭から）
+// シールド・耐性ダウン → 設置・控えアタッカー → 短時間のバッファー（直後のメインに乗せる）→ メイン
+const SHIELDERS = new Set(['Zhongli', 'Diona', 'Layla', 'Kirara', 'Noelle', 'Thoma', 'Candace', 'Citlali', 'Ineffa', 'Lauma']);
+const BUFFERS = new Set(['Bennett', 'Kaedehara Kazuha', 'Sucrose', 'Mona', 'Kujou Sara', 'Faruzan', 'Chevreuse', 'Shenhe', 'Yun Jin',
+  'Gorou', 'Xilonen', 'Rosaria', 'Lynette', 'Lan Yan', 'Yumemizuki Mizuki', 'Xianyun', 'Ifa']);
+
+export function roleOf(m, mainIndex) {
+  if (m.index === mainIndex) return 'main';
+  if (SHIELDERS.has(m.charData.key)) return 'shield';
+  if (BUFFERS.has(m.charData.key)) return 'buffer';
+  return 'sub';
+}
+export const ROLE_JA = { main: 'メインアタッカー', shield: 'シールド・デバフ', sub: 'サブアタッカー（控え）', buffer: 'バッファー' };
+const ROLE_ORDER = { shield: 0, sub: 1, buffer: 2, main: 3 };
+
+/**
+ * メインアタッカーを推定:
+ * 「フィールドを任せたときに増えるダメージ ÷ 増えるフィールド時間」が最も大きいメンバー。
+ * 控えでのダメージが中心のキャラ（夜蘭・フリーナなど）は、フィールドにいても伸びないためメインに選ばれにくい
+ */
+export function guessMain(members, L = 20) {
   let best = null;
   for (const m of members) {
-    if (profileFor(m.charData)?.support) continue;
-    const r = evaluateCombo(m.engine, { ...recommendCombo(m.engine, { fillNormal: true }).combo, duration: null });
-    if (!best || r.dps > best.dps) best = { index: m.index, dps: r.dps };
+    const sup = recommendCombo(m.engine, { role: 'support', rotationLength: L });
+    const main = recommendCombo(m.engine, { role: 'main', rotationLength: L, fieldBudget: L * 0.6 });
+    const s = evaluateCombo(m.engine, { ...sup.combo, duration: null });
+    const f = evaluateCombo(m.engine, { ...main.combo, duration: null });
+    let gain = (f.totalDamage - s.totalDamage) / Math.max(0.5, f.totalTime - s.totalTime);
+    if (profileFor(m.charData)?.support || BUFFERS.has(m.charData.key) || SHIELDERS.has(m.charData.key)) gain *= 0.5;
+    if (!best || gain > best.gain) best = { index: m.index, gain };
   }
   return best?.index ?? members[0]?.index ?? null;
 }
 
 /**
  * 推奨チームローテを生成
- * サポートは元素スキル・爆発と持続ダメージのみ、メインは残りのフィールド時間で通常攻撃なども行う
+ * サポートは役割順に元素スキル・爆発（＋持続ダメージ）、メインアタッカーは残りのフィールド時間を使う
  */
 export function recommendTeam(teamCalc, { mainIndex = null } = {}) {
   const { team, members } = teamCalc;
   const L = team.rotationLength;
-  const main = mainIndex ?? team.mainIndex ?? guessMain(members);
+  const main = mainIndex ?? team.mainIndex ?? guessMain(members, L);
   const combos = [null, null, null, null];
   const notes = [];
   const order = [];
-  let supportField = 0;
-  for (const m of members) {
-    if (m.index === main) continue;
-    const rec = recommendCombo(m.engine, { rotationLength: L, fillNormal: false, fillState: false });
+  const supports = members
+    .filter((m) => m.index !== main)
+    .map((m) => ({ m, role: roleOf(m, main) }))
+    .sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || a.m.index - b.m.index);
+  let t = 0;
+  for (const { m, role } of supports) {
+    const rec = recommendCombo(m.engine, { role: 'support', rotationLength: L });
     combos[m.index] = { ...rec.combo, duration: null };
-    supportField += evaluateCombo(m.engine, combos[m.index]).totalTime;
-    order.push(`${m.build.nameJa}（${rec.sequence}）`);
+    order.push({ index: m.index, name: m.build.nameJa, role, start: Math.round(t * 10) / 10, steps: rec.timeline.map((s) => s.label) });
+    t += rec.fieldTime;
   }
+  const supportField = t;
   const mainMember = members.find((m) => m.index === main);
   if (mainMember) {
     const budget = Math.max(0, L - supportField);
-    const rec = recommendCombo(mainMember.engine, { rotationLength: L, fieldBudget: budget, fillNormal: true });
+    const rec = recommendCombo(mainMember.engine, { role: 'main', rotationLength: L, fieldBudget: budget });
     combos[main] = { ...rec.combo, duration: null };
-    order.push(`${mainMember.build.nameJa}（${rec.sequence}）`);
-    notes.push(`メインアタッカーは${mainMember.build.nameJa}。サポートの行動に約${Math.round(supportField * 10) / 10}秒使い、残り約${Math.round(budget * 10) / 10}秒をメインアタッカーが使う想定です。`);
+    order.push({
+      index: main, name: mainMember.build.nameJa, role: 'main', start: Math.round(t * 10) / 10,
+      steps: rec.timeline.map((s) => `${(Math.round((t + s.start) * 10) / 10).toFixed(1)}秒 ${s.label}`),
+    });
+    notes.push(`メインアタッカーは${mainMember.build.nameJa}（フィールド時間を任せたときのダメージの伸びが最も大きいメンバー）。サポートの行動に約${Math.round(supportField * 10) / 10}秒、残り約${Math.round(budget * 10) / 10}秒をメインが使います。`);
+    if (budget < 6) notes.push('メインアタッカーのフィールド時間が短くなっています。ローテーション時間を延ばすと通常攻撃の時間を確保できます。');
   }
-  notes.push(`${L}秒のローテーションで、サポートの元素スキルはCDの許す回数、元素爆発は1回使う想定です。持続ダメージのヒット数は目安なので、必要に応じて回数を調整してください。`);
+  notes.push('順番は「シールド・デバフ → サブアタッカー（設置・控え攻撃）→ バッファー → メイン」です。バッファーはメインの直前に置き、効果時間を無駄にしないようにしています。');
+  notes.push('サポートの元素スキルはローテーション中1回（CDが短いキャラはメインの攻撃中にもう一度使える場合があります）。持続ダメージのヒット数は目安なので、必要に応じて回数を調整してください。');
   return { combos, mainIndex: main, order, notes };
 }
 

@@ -162,6 +162,20 @@ export const PROFILES = {
     notes: ['重撃「衡平な裁量」は約0.5秒ごとの継続ヒットとして、1ヒットあたり0.6秒（溜め時間込みの目安）で計算しています。'],
   },
 
+  Flins: {
+    // 元素スキルで「顕現の炎」状態（10秒）に入り、通常攻撃が専用の攻撃になる。状態中は北地の槍嵐（CD6秒）を2回
+    stateTalent: 'skill',
+    stateDuration: 10,
+    skillCasts: 1,
+    hitCounts: () => ({
+      'Northland Spearstorm DMG': 2,
+      'Middle Phase Lunar-Charged DMG': 2,
+      'Thunderous Symphony DMG': 0,
+      'Thunderous Symphony Additional DMG': 0,
+    }),
+    notes: ['フリンズは元素スキルで「顕現の炎」状態（約10秒）に入り、状態中の通常攻撃と北地の槍嵐で戦う想定です。元素爆発の月感電ダメージは概算です。'],
+  },
+
   Mavuika: {
     stateTalent: 'skill',
     stateDuration: 10,
@@ -232,6 +246,9 @@ for (const [key, hits] of Object.entries(SUPPORTS)) {
   };
 }
 for (const key of ['Xiangling', 'Nahida', 'Yelan']) PROFILES[key].support = true;
+// 控えで使うとき元素爆発を先に使うキャラ
+for (const key of ['Bennett', 'Xingqiu', 'Yelan', 'Sucrose']) PROFILES[key].burstFirst = true;
+PROFILES['Hu Tao'].burstLast = true;
 
 export function profileFor(charData) {
   return PROFILES[charData?.key] ?? null;

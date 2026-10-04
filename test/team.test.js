@@ -88,3 +88,32 @@ test('どの4人を組んでも推奨チームローテが計算できる', () =
     assert.ok(Number.isFinite(ev.dps) && ev.dps >= 0, keys.slice(i, i + 4).join(','));
   }
 });
+
+test('推奨チームローテの並び順: シールド → 控え → バッファー（メインの直前）→ メイン', () => {
+  const ins = [member('Hu Tao', template), member('Bennett'), member('Zhongli'), member('Xingqiu')];
+  const t = createTeam(ins, { rotationLength: 20 });
+  const rec = recommendTeam(t, { mainIndex: 0 });
+  assert.deepEqual(rec.order.map((o) => o.name), ['鍾離', '行秋', 'ベネット', '胡桃']);
+  assert.deepEqual(rec.order.map((o) => o.role), ['shield', 'sub', 'buffer', 'main']);
+  // 開始秒数は単調増加
+  for (let i = 1; i < rec.order.length; i++) assert.ok(rec.order[i].start >= rec.order[i - 1].start);
+});
+
+test('控え役は特殊状態の攻撃をせず、元素スキルは1回（フリンズのCDをサブ技と取り違えない）', () => {
+  const flins = charByName('Flins');
+  assert.equal(flins.talents.skill.cooldown[9], 16);
+  const ins = [member('Hu Tao', template), member('Flins'), member('Furina'), member('Yelan')];
+  const t = createTeam(ins, { rotationLength: 20 });
+  const rec = recommendTeam(t, { mainIndex: 0 });
+  const fl = t.members[1].engine;
+  const chainIds = new Set(fl.actions.filter((a) => a.kind === 'chain' || a.kind === 'charged').map((a) => a.id));
+  assert.ok(!rec.combos[1].entries.some((e) => chainIds.has(e.actionId)), '控えのフリンズは攻撃しない');
+  const fo = rec.order.find((o) => o.index === 1);
+  assert.equal(fo.steps.filter((s) => s.startsWith('元素スキル')).length, 1);
+});
+
+test('メイン判定: 控えダメージ型（夜蘭・フリーナ）より、フィールドで伸びるキャラがメインになる', () => {
+  const ins = [member('Yelan'), member('Furina'), member('Hu Tao', template), member('Xingqiu')];
+  const t = createTeam(ins, { rotationLength: 20 });
+  assert.equal(recommendTeam(t).mainIndex, 2);
+});

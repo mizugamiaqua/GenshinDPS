@@ -1,7 +1,7 @@
 // チームDPS画面（4人編成のローテーション）
 import { h, clear, fmt, pct, sec, toast, img } from './dom.js';
 import { store } from './store.js';
-import { createTeam, evaluateTeam, normalizeTeam, recommendTeam } from './core/team.js';
+import { ROLE_JA, createTeam, evaluateTeam, normalizeTeam, recommendTeam } from './core/team.js';
 import { REACTIONS, reactionApplies } from './core/damage.js';
 import { CATEGORY_JA, ELEMENT_JA } from './core/constants.js';
 
@@ -34,6 +34,9 @@ function teamInputs(team) {
     return { id, charData, build, settings: store.getSettings(id) };
   });
 }
+
+/** ユーザーが明示的に選んだメインアタッカー（自動判定のときは null） */
+const fixedMain = (team) => (team.mainAuto === false ? team.mainIndex : null);
 
 function saveTeam(id, team) {
   store.saveTeam(id, team);
@@ -96,7 +99,7 @@ export function renderTeamView() {
   const calc = createTeam(teamInputs(team), team);
   // コンボが未設定のメンバーがいれば推奨ローテで初期化
   if (calc.members.some((m) => !team.combos[m.index])) {
-    const rec = recommendTeam(calc);
+    const rec = recommendTeam(calc, { mainIndex: fixedMain(team) });
     team.combos = team.combos.map((c, i) => c ?? rec.combos[i]);
     team.mainIndex ??= rec.mainIndex;
     store.saveTeam(id, team);
@@ -115,6 +118,8 @@ function membersPanel(id, team, calc) {
   const chars = supportedCharacters();
   return h('section', { class: 'card' },
     h('h3', {}, 'メンバー'),
+    team.mainAuto === false && h('p', { class: 'small' }, 'メインアタッカーを手動で指定中です。',
+      h('button', { class: 'btn btn-small', onclick: () => updateTeam(id, (t) => { t.mainAuto = true; view.recommendation = null; }) }, '自動判定に戻す')),
     h('div', { class: 'team-slots' }, [0, 1, 2, 3].map((i) => {
       const memberId = team.members[i];
       const m = calc.members.find((x) => x.index === i);
@@ -138,8 +143,8 @@ function membersPanel(id, team, calc) {
             build && h('div', { class: 'muted small' }, badge(build.element), ` ${build.weapon?.nameJa ?? ''}`))),
         build && h('div', { class: 'slot-options' },
           h('label', { class: 'inline' },
-            h('input', { type: 'radio', name: 'main-member', checked: team.mainIndex === i, onchange: () => updateTeam(id, (t) => { t.mainIndex = i; }) }),
-            'メインアタッカー'),
+            h('input', { type: 'radio', name: 'main-member', checked: team.mainIndex === i, onchange: () => updateTeam(id, (t) => { t.mainIndex = i; t.mainAuto = false; }) }),
+            'メインアタッカー', team.mainIndex === i && team.mainAuto !== false ? h('small', { class: 'muted' }, '（自動判定）') : null),
           h('label', { class: 'inline' }, '反応',
             h('select', {
               onchange: (e) => updateTeam(id, (t) => { t.reactions[i] = { ...(t.reactions[i] ?? {}), type: e.target.value }; }),
@@ -232,19 +237,23 @@ function recommendPanel(id, team, calc) {
     h('div', { class: 'row-actions' },
       h('button', {
         class: 'btn btn-primary', onclick: () => {
-          view.recommendation = { id, rec: recommendTeam(calc, { mainIndex: team.mainIndex }) };
+          view.recommendation = { id, rec: recommendTeam(calc, { mainIndex: fixedMain(team) }) };
           renderTeamView();
         },
       }, '推奨チームローテを生成')));
   if (rec) {
     const preview = evaluateTeam(calc, rec.combos);
     box.append(
-      h('ol', { class: 'rec-order' }, rec.order.map((o) => h('li', {}, o))),
+      h('ol', { class: 'rec-order' }, rec.order.map((o) => h('li', {},
+        h('div', {}, h('strong', {}, o.name), h('span', { class: 'muted small' }, ` ${ROLE_JA[o.role]} ・ ${o.start.toFixed(1)}秒〜`)),
+        o.role === 'main'
+          ? h('ul', { class: 'rec-steps' }, o.steps.map((x) => h('li', {}, x)))
+          : h('div', { class: 'small' }, o.steps.join(' → '))))),
       h('div', { class: 'rec-kpi' }, `予想チームDPS ${fmt(preview.dps)}`),
       h('ul', { class: 'rec-notes' }, rec.notes.map((n) => h('li', {}, n))),
       h('button', {
         class: 'btn btn-primary', onclick: () => {
-          updateTeam(id, (t) => { t.combos = rec.combos; t.mainIndex = rec.mainIndex; });
+          updateTeam(id, (t) => { t.combos = rec.combos; t.mainIndex = rec.mainIndex; t.mainAuto = t.mainAuto === false ? false : true; });
           view.recommendation = null;
           toast('推奨チームローテを適用しました。', 'success');
         },

@@ -730,7 +730,7 @@ function recommendPanel(st) {
   const lengthInput = h('input', { type: 'number', min: 5, max: 60, step: 1, value: ui.recLength, placeholder: '自動' });
   const box = h('section', { class: 'card recommend' },
     h('h3', {}, '推奨コンボ'),
-    h('p', { class: 'muted small' }, '現在のステータス・バフ・天賦レベルから、元素爆発 → 元素スキル（CDの許す回数）→ 残り時間を最もDPS効率の高い通常攻撃パターンで埋める、という方針で自動生成します。'),
+    h('p', { class: 'muted small' }, '現在のステータス・バフ・天賦レベルから、元素スキル → 元素爆発 → 特殊状態中の攻撃 → 最もDPS効率の高い通常攻撃パターン（CDが明けたら元素スキルを再使用）という流れで、行動の順番と時間を自動生成します。'),
     h('div', { class: 'inline-form' },
       h('label', {}, 'ローテーション秒数 ', lengthInput),
       h('button', {
@@ -743,7 +743,7 @@ function recommendPanel(st) {
   if (rec) {
     const r = evaluateCombo(engine, rec.combo);
     box.append(
-      h('div', { class: 'rec-sequence' }, rec.sequence),
+      h('ol', { class: 'rec-sequence rec-steps' }, rec.timeline.map((x) => h('li', {}, `${x.start.toFixed(1)}秒 ${x.label}`))),
       h('div', { class: 'rec-kpi' }, `予想DPS ${fmt(r.dps)} ・ 合計 ${fmt(r.totalDamage)} ・ ${sec(r.duration)}`),
       h('ul', { class: 'rec-notes' }, rec.notes.map((n) => h('li', {}, n))),
       rec.alternatives.map((alt) => h('details', { class: 'help' },

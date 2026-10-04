@@ -120,20 +120,19 @@ function durationOf(engine, talent) {
 }
 
 /**
- * 推奨コンボを生成する
- * 方針:
- *   1. 元素爆発を1回（ダメージ行は択一のものから最大を選択）
- *   2. 元素スキルをローテーション中にCDが許す回数（単押し/長押しはDPS効率の高い方）
- *   3. 特殊状態（雷電の夢想の一心など）があればその間の攻撃パターンを最適化
- *   4. 残り時間を「通常N段＋重撃」の中で最もDPS効率が高いパターンで埋める
+ * 推奨コンボを生成する（行動のタイムラインを組み立て、そこからコンボを作る）
+ *
+ * role = 'main'（フィールドで戦う）:
+ *   元素スキル → 元素爆発 → 特殊状態中の攻撃 → 通常攻撃パターン …（CDが明けたら元素スキルを再使用）
+ *   使える時間は fieldBudget（チーム時）または rotationLength
+ * role = 'support'（控えから支援）:
+ *   元素スキル・元素爆発（順番はプロファイル指定）と、その後の控えでの継続ダメージだけ
+ *
  * @param {object} engine
- * @param {{rotationLength?:number, fillNormal?:boolean, fieldBudget?:number}} opts
- *   fillNormal  残り時間を通常攻撃で埋めるか（未指定ならプロファイルに従う）
- *   fieldBudget このキャラが使えるフィールド時間（チーム編成時）
- *   fillState   特殊状態中の攻撃を入れるか（チームのサポート役は false）
+ * @param {{rotationLength?:number, role?:'main'|'support', fillNormal?:boolean, fieldBudget?:number, fillState?:boolean}} opts
  */
 export function recommendCombo(engine, opts = {}) {
-  const { charData, actions } = engine;
+  const { charData, actions, byId } = engine;
   const profile = profileFor(charData) ?? {};
   const dmgCache = new Map();
   const dmg = (a) => {
@@ -141,148 +140,191 @@ export function recommendCombo(engine, opts = {}) {
     return dmgCache.get(a.id);
   };
   const hitCounts = profile.hitCounts ? profile.hitCounts(engine.ctx) : {};
+  const countOf = (r, fallback) => hitCounts[r.baseNameEn] ?? hitCounts[r.nameEn] ?? fallback;
+  // 役割: 控え中心のキャラ（profile.support）は support、それ以外は main。fillNormal は main のときだけ意味を持つ
+  const role = opts.role ?? (opts.fillNormal === false || profile.support ? 'support' : 'main');
+  const fillNormal = role === 'main' && (opts.fillNormal ?? profile.fillNormal ?? true);
 
   const burstCd = cooldownOf(engine, 'burst');
   const L = Number(opts.rotationLength) || profile.rotationLength
     || (burstCd ? Math.min(25, Math.max(12, burstCd)) : 20);
-
-  const entries = [];
-  const steps = [];
+  const budget = role === 'main' ? (opts.fieldBudget != null ? opts.fieldBudget : L) : Infinity;
+  const skillName = charData.talents.skill?.name ?? '';
+  const burstName = charData.talents.burst?.name ?? '';
   const notes = [...(profile.notes ?? [])];
-  let used = 0;
-  const add = (action, count, time = action.defaultTime) => {
-    if (!action || count <= 0) return;
-    const existing = entries.find((e) => e.actionId === action.id && e.time === time);
-    if (existing) existing.count += count;
-    else entries.push({ actionId: action.id, count, time, reaction: 'auto' });
-    used += time * count;
-  };
-  const byId = engine.byId;
+  const alternatives = [];
 
-  // --- 1. 元素スキル ---
+  // --- 元素スキルの1回分 ---
   const skillRows = actions.filter((a) => a.talent === 'skill' && ['press', 'hold', 'other'].includes(a.kind));
   const press = skillRows.filter((a) => a.kind === 'press');
   const hold = skillRows.filter((a) => a.kind === 'hold');
   const common = pickAlternatives(skillRows.filter((a) => a.kind === 'other'), dmg);
-  let skillMode = null;
   let skillCd = cooldownOf(engine, 'skill');
+  let mode = null;
   if (press.length && hold.length) {
     const pressCd = cooldownOf(engine, 'skill', /^(Press|Tap) CD$/i) ?? skillCd;
     const holdCd = cooldownOf(engine, 'skill', /^Hold CD$/i) ?? skillCd;
     const bestPress = pickAlternatives(press, dmg)[0];
     const bestHold = pickAlternatives(hold, dmg)[0];
-    // ローテーション全体で与えられるダメージで比較
-    const casts = (cd) => profile.skillCasts ?? Math.ceil(L / (cd || L) - 1e-9);
-    const pressTotal = casts(pressCd) * dmg(bestPress);
-    const holdTotal = casts(holdCd) * dmg(bestHold);
-    skillMode = holdTotal > pressTotal ? { row: bestHold, cd: holdCd, label: '長押し' } : { row: bestPress, cd: pressCd, label: '単押し' };
-    skillCd = skillMode.cd;
+    const span = role === 'main' ? Math.min(L, budget) : L;
+    const casts = (cd) => profile.skillCasts ?? Math.max(1, Math.ceil(span / (cd || span) - 1e-9));
+    mode = casts(holdCd) * dmg(bestHold) > casts(pressCd) * dmg(bestPress)
+      ? { row: bestHold, cd: holdCd, label: '長押し' }
+      : { row: bestPress, cd: pressCd, label: '単押し' };
+    skillCd = mode.cd;
   } else if (press.length || hold.length) {
     const row = pickAlternatives([...press, ...hold], dmg)[0];
-    skillMode = { row, cd: skillCd, label: row.kind === 'hold' ? '長押し' : '単押し' };
+    mode = { row, cd: skillCd, label: row.kind === 'hold' ? '長押し' : '単押し' };
   }
-  const skillCasts = profile.skillCasts ?? Math.max(1, Math.ceil(L / (skillCd || L) - 1e-9));
-  // 特殊状態（継続時間あり）が無いスキル内の連撃（ディルックの3段斬りなど）は1回の発動に含める
+  // 継続時間のある特殊状態（雷電の夢想の一心、フリンズの顕現の炎など）
   const stateTalent = profile.stateTalent
     ?? ['burst', 'skill'].find((t) => actions.some((a) => a.talent === t && a.kind === 'chain') && durationOf(engine, t));
+  // 特殊状態ではないスキル内の連撃（ディルックの3段斬りなど）は1回の発動に含める
   const skillChain = stateTalent === 'skill' ? [] : actions.filter((a) => a.talent === 'skill' && a.kind === 'chain');
-  if (skillMode) {
-    add(skillMode.row, skillCasts);
-  } else if (skillChain.length) {
-    for (const r of skillChain) add(r, skillCasts);
-  } else {
-    add(byId['cast:skill'], skillCasts);
-  }
-  for (const r of common) {
-    add(r, hitCounts[r.baseNameEn] ?? hitCounts[r.nameEn] ?? skillCasts, 0);
-  }
-  steps.push(`元素スキル${skillMode ? `（${skillMode.label}）` : ''} ×${skillCasts}`);
-  if (skillCd) notes.push(`元素スキルのCDは${skillCd}秒。${L}秒のローテーションで${skillCasts}回使用します。`);
+  const castRows = mode ? [{ action: mode.row, count: 1 }]
+    : skillChain.length ? skillChain.map((r) => ({ action: r, count: 1 }))
+      : [{ action: byId['cast:skill'], count: 1 }];
+  const skillCastTime = castRows.reduce((s, r) => s + r.action.defaultTime * r.count, 0);
+  const skillLabel = `元素スキル「${skillName}」${mode && press.length && hold.length ? `（${mode.label}）` : ''}`;
 
-  // --- 2. 元素爆発 ---
+  // --- 元素爆発 ---
   const burstRows = pickAlternatives(actions.filter((a) => a.talent === 'burst' && ['press', 'hold', 'other'].includes(a.kind)), dmg);
-  add(byId['cast:burst'], 1);
-  for (const r of burstRows) add(r, hitCounts[r.baseNameEn] ?? hitCounts[r.nameEn] ?? 1, 0);
-  steps.push('元素爆発');
-  if (burstRows.length && !profile.hitCounts) {
-    notes.push('持続ダメージ（設置物・継続攻撃）のヒット数はキャラによって異なるため、1回として計算しています。必要に応じて回数を調整してください。');
-  }
+  const burstCastTime = byId['cast:burst'].defaultTime;
 
-  // --- 3. 特殊状態中の攻撃 ---
-  const alternatives = [];
+  // --- タイムライン ---
+  const timeline = [];
+  let t = 0;
+  let skillCasts = 0;
+  let lastSkill = -Infinity;
+  const push = (label, rows, kind, pattern = null) => {
+    const time = rows.reduce((s, r) => s + (r.time ?? r.action.defaultTime) * r.count, 0);
+    const last = timeline[timeline.length - 1];
+    if (pattern && last?.pattern && last.pattern.key === pattern.key) {
+      // 同じ攻撃パターンが続く場合は1つにまとめる（[1段→重撃] ×8 など）
+      last.pattern.n += pattern.n;
+      last.label = `${pattern.title}: [${pattern.text}]${last.pattern.n > 1 ? ` ×${last.pattern.n}` : ''}`;
+      rows.forEach((r, i) => { last.rows[i].count += r.count; });
+      last.time += time;
+    } else {
+      timeline.push({ label, kind, start: t, time, rows, pattern });
+    }
+    t += time;
+  };
+  const castSkill = (suffix = '') => {
+    push(skillLabel + suffix, castRows, 'skill');
+    skillCasts++;
+    lastSkill = t - skillCastTime;
+  };
+  const castBurst = () => {
+    const rows = [{ action: byId['cast:burst'], count: 1 }, ...burstRows.map((r) => ({ action: r, count: countOf(r, 1), time: 0 }))];
+    push(`元素爆発「${burstName}」`, rows.filter((r) => r.count > 0), 'burst');
+  };
+
   const allowChargedOnly = ['WEAPON_CATALYST', 'WEAPON_BOW'].includes(charData.weaponType);
-  const fill = (seconds, chainRows, chargedRows, title) => {
+  const candidatesFor = (talent, title) => {
+    const chainRows = actions.filter((a) => a.talent === talent && a.kind === 'chain');
+    const chargedRows = actions.filter((a) => a.talent === talent && a.kind === 'charged');
     let cands = fillerCandidates(chainRows, chargedRows, dmg, { allowChargedOnly });
-    if (profile.pattern && title === '通常攻撃') {
+    if (profile.pattern && talent === 'normal') {
       const p = profile.pattern;
-      const names = [].concat(p.charged ?? []);
       const chain = chainRows.filter((r) => r.chain && r.chain <= p.chain).sort((a, b) => a.chain - b.chain);
-      const cas = names.map((n) => chargedRows.find((r) => r.baseNameEn === n)).filter(Boolean);
+      const cas = [].concat(p.charged ?? []).map((n) => chargedRows.find((r) => r.baseNameEn === n)).filter(Boolean);
       const rows = [...chain, ...cas];
       const damage = rows.reduce((s, r) => s + dmg(r), 0);
       cands = [{ rows, damage, time: p.time, dps: damage / p.time, fixed: true }, ...cands];
     }
-    if (!cands.length || seconds <= 0.2) return;
+    if (cands.length) alternatives.push({ title, candidates: cands.slice(0, 4).map((c) => ({ label: patternLabel(c.rows), dps: c.dps, time: c.time })) });
+    return cands;
+  };
+  const patternRows = (c, n) => (c.fixed
+    ? c.rows.map((r) => ({ action: r, count: n, time: Math.round((c.time / c.rows.length) * 100) / 100 }))
+    : c.rows.map((r) => ({ action: r, count: n })));
+  /** seconds 秒を攻撃パターンで埋める（stopAt を返すと途中で打ち切り） */
+  const fillWith = (cands, seconds, title, { recastSkill = false } = {}) => {
+    if (!cands.length) return;
+    const end = t + seconds;
     const best = cands[0];
-    let reps = Math.floor(seconds / best.time + 1e-6);
-    let remaining = seconds - reps * best.time;
-    if (reps === 0) {
-      const fit = cands.find((c) => c.time <= seconds);
-      if (!fit) return;
-      reps = 1;
-      remaining = seconds - fit.time;
-      addPattern(fit, 1);
-    } else {
-      addPattern(best, reps);
-    }
-    // 端数時間は入る中で効率の良いパターンで埋める
-    const tail = best.fixed ? null : cands.find((c) => c.time <= remaining && c !== best);
-    if (tail) addPattern(tail, 1);
-    steps.push(`${title}: [${patternLabel(best.rows)}] ×${reps}${tail ? ` + [${patternLabel(tail.rows)}]` : ''}`);
-    alternatives.push({ title, candidates: cands.slice(0, 4).map((c) => ({ label: patternLabel(c.rows), dps: c.dps, time: c.time })) });
-
-    function addPattern(c, n) {
-      if (c.fixed) {
-        // 固定パターンは合計時間を段に按分
-        const per = c.time / c.rows.length;
-        for (const r of c.rows) add(r, n, Math.round(per * 100) / 100);
-      } else {
-        for (const r of c.rows) add(r, n);
+    while (end - t > 0.2) {
+      if (recastSkill && skillCd && skillCasts < maxCasts && t - lastSkill >= skillCd && t + skillCastTime <= end) {
+        castSkill('（CD明け）');
+        continue;
       }
+      const left = end - t;
+      const nextSkill = recastSkill && skillCd && skillCasts < maxCasts ? Math.max(0, lastSkill + skillCd - t) : Infinity;
+      // 最適パターンが入るなら続ける（スキル再使用は少し遅らせてよい）。入らない端数だけ短いパターンで埋める
+      const pick = best.time <= left + 1e-6 ? best : cands.find((c) => c.time <= left + 1e-6);
+      if (!pick) break;
+      const window = Math.min(left, nextSkill > 0.05 ? nextSkill : left);
+      const n = pick === best ? Math.max(1, Math.floor(window / pick.time + 1e-6)) : 1;
+      const text = patternLabel(pick.rows);
+      push(`${title}: [${text}]${n > 1 ? ` ×${n}` : ''}`, patternRows(pick, n), 'attack', { key: `${title}|${text}`, n, title, text });
+      if (best.fixed && pick !== best) break;
     }
   };
 
-  if (stateTalent && opts.fillState !== false) {
-    const D0 = profile.stateDuration ?? durationOf(engine, stateTalent) ?? 7;
-    const D = opts.fieldBudget != null ? Math.min(D0, Math.max(0, opts.fieldBudget - used)) : D0;
-    const chainRows = actions.filter((a) => a.talent === stateTalent && a.kind === 'chain');
-    const chargedRows = actions.filter((a) => a.talent === stateTalent && a.kind === 'charged');
-    if (chainRows.length) {
-      fill(D, chainRows, chargedRows, `${CATEGORY_JA[stateTalent]}中の攻撃`);
-      notes.push(`${CATEGORY_JA[stateTalent]}の特殊状態（約${D}秒）中は専用の攻撃に置き換わるため、その間の最適パターンを選びました。`);
+  let maxCasts = 1;
+  if (role === 'support') {
+    // 控えのキャラは自分の番にスキル・爆発を使ってすぐ交代する
+    const order = profile.burstFirst ? ['burst', 'skill'] : ['skill', 'burst'];
+    const casts = profile.skillCasts ?? 1;
+    for (const step of order) {
+      if (step === 'skill') for (let i = 0; i < casts; i++) castSkill(i ? '（2回目）' : '');
+      else castBurst();
     }
+  } else {
+    maxCasts = profile.skillCasts ?? Math.max(1, Math.ceil(Math.min(L, budget) / (skillCd || L) - 1e-9));
+    const burstLast = !!profile.burstLast;
+    if (profile.burstFirst) castBurst();
+    castSkill();
+    if (!profile.burstFirst && !burstLast) castBurst();
+    if (stateTalent && opts.fillState !== false) {
+      const D0 = profile.stateDuration ?? durationOf(engine, stateTalent) ?? 7;
+      const D = Math.min(D0, Math.max(0, budget - t - (burstLast ? burstCastTime : 0)));
+      fillWith(candidatesFor(stateTalent, `${CATEGORY_JA[stateTalent]}中の攻撃`), D, `${CATEGORY_JA[stateTalent]}の特殊状態中`);
+      if (D > 0) notes.push(`${CATEGORY_JA[stateTalent]}の特殊状態（約${Math.round(D0 * 10) / 10}秒）中は専用の攻撃に置き換わるため、その間の最適パターンを選びました。`);
+    }
+    if (fillNormal) {
+      const reserve = burstLast ? burstCastTime : 0;
+      const rest = Math.max(0, budget - t - reserve);
+      const seconds = profile.fillDuration != null ? Math.min(profile.fillDuration, rest) : rest;
+      const cands = candidatesFor('normal', '通常攻撃');
+      fillWith(cands, seconds, '通常攻撃', { recastSkill: !profile.skillCasts });
+      if (cands.length) notes.push(`通常攻撃は「${patternLabel(cands[0].rows)}」が最もDPS効率が高い（${Math.round(cands[0].dps).toLocaleString()}/秒）と判定しました。モーション時間は武器種ごとの目安値です。`);
+    }
+    if (burstLast) castBurst();
   }
 
-  // --- 4. 残り時間を通常攻撃で埋める ---
-  const fillNormal = opts.fillNormal ?? profile.fillNormal ?? true;
-  if (fillNormal) {
-    // チーム編成時は、他メンバーが使う時間を除いたフィールド時間（fieldBudget）の範囲で埋める
-    const budget = opts.fieldBudget != null ? Math.max(0, opts.fieldBudget - used) : Math.max(0, L - used);
-    const rest = profile.fillDuration != null ? Math.min(profile.fillDuration, budget) : budget;
-    const chainRows = actions.filter((a) => a.talent === 'normal' && a.kind === 'chain');
-    const chargedRows = actions.filter((a) => a.talent === 'normal' && a.kind === 'charged');
-    fill(rest, chainRows, chargedRows, '通常攻撃');
-    const alt = alternatives.find((a) => a.title === '通常攻撃');
-    if (alt?.candidates.length) {
-      notes.push(`通常攻撃は「${alt.candidates[0].label}」が最もDPS効率が高い（${Math.round(alt.candidates[0].dps).toLocaleString()}/秒）と判定しました。モーション時間は武器種ごとの目安値です。`);
-    }
+  // 元素スキルで出る設置物・継続ダメージ（グゥオパァー、サロンメンバーなど）
+  if (common.length) {
+    const rows = common.map((r) => ({ action: r, count: countOf(r, skillCasts), time: 0 })).filter((r) => r.count > 0);
+    const skillStep = timeline.find((s) => s.kind === 'skill');
+    if (skillStep && rows.length) skillStep.rows.push(...rows);
+  }
+  if (skillCd && role === 'main') notes.push(`元素スキルのCDは${skillCd}秒。使えるフィールド時間（約${Math.round(Math.min(L, budget) * 10) / 10}秒）の中で${skillCasts}回使用します。`);
+  if (!profile.hitCounts && (burstRows.length > 1 || common.length)) {
+    notes.push('持続ダメージ（設置物・継続攻撃）のヒット数はキャラによって異なるため、1回として計算しています。必要に応じて回数を調整してください。');
   }
 
+  // タイムライン → コンボ（同じ行動・同じ時間はまとめる）
+  const entries = [];
+  for (const step of timeline) {
+    for (const r of step.rows) {
+      if (!r.action || r.count <= 0) continue;
+      const time = r.time ?? r.action.defaultTime;
+      const ex = entries.find((e) => e.actionId === r.action.id && e.time === time);
+      if (ex) ex.count += r.count;
+      else entries.push({ actionId: r.action.id, count: r.count, time, reaction: 'auto' });
+    }
+  }
+  // 控えで戦うキャラ（プロファイルでローテ秒数指定あり）は、その秒数でDPSを割る
   const duration = profile.rotationLength ?? (Number(opts.rotationLength) || null);
   return {
     combo: { entries, duration },
+    role,
     rotationLength: L,
-    sequence: steps.join(' → '),
+    fieldTime: t,
+    timeline: timeline.map((s) => ({ label: s.label, start: Math.round(s.start * 100) / 100, time: Math.round(s.time * 100) / 100, kind: s.kind })),
+    sequence: timeline.map((s) => s.label).join(' → '),
     notes,
     alternatives,
   };

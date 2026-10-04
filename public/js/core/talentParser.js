@@ -176,6 +176,7 @@ export function parseTalent(talentKey, en, ja) {
   const rows = [];
   const extras = [];
   const info = { cooldown: null, energyCost: null, duration: null };
+  let cdRank = 0;
 
   labelsEn.forEach((labelEn, idx) => {
     const [nameEn, tplEn = ''] = labelEn.split('|');
@@ -185,7 +186,14 @@ export function parseTalent(talentKey, en, ja) {
     // CD・元素エネルギー・継続時間は推奨コンボ生成で使う
     const firstParam = (tplEn.match(PARAM_RE) || [])[1];
     if (firstParam) {
-      if (/(^|\s)CD$/i.test(nameEn) && !info.cooldown) info.cooldown = numberOrNull(params[firstParam]);
+      // 「CD」「Skill CD」を優先し、サブ技のCD（"Northland Spearstorm CD" など）とは区別する
+      if (/(^|\s)CD$/i.test(nameEn)) {
+        const rank = /^CD$/i.test(nameEn) ? 3 : /^(Skill|Press|Tap) CD$/i.test(nameEn) ? 2 : 1;
+        if (!info.cooldown || rank > cdRank) {
+          info.cooldown = numberOrNull(params[firstParam]);
+          cdRank = rank;
+        }
+      }
       if (/Energy Cost/i.test(nameEn) && !info.energyCost) info.energyCost = params[firstParam]?.[0] ?? null;
       if (/^Duration$/i.test(nameEn) && !info.duration) info.duration = numberOrNull(params[firstParam]);
     }

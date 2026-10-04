@@ -398,3 +398,6 @@ code { background: var(--bg-soft); padding: 1px 6px; border-radius: 4px; font-si
 .rec-order li { margin: 2px 0; }
 .approx { color: var(--accent); font-weight: 600; }
 .result.team-result { position: static; }
+.rec-order > li { margin: 6px 0; }
+.rec-steps { margin: 4px 0 0; padding-left: 1.1em; font-size: 0.85rem; list-style: none; }
+.rec-steps li { margin: 1px 0; font-variant-numeric: tabular-nums; }

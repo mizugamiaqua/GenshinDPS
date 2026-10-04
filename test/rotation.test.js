@@ -101,3 +101,23 @@ test('全キャラで推奨コンボが生成でき、DPSが有限値になる',
     assert.ok(rec.combo.entries.length > 0, `${key} ${c.nameJa}`);
   }
 });
+
+test('推奨コンボのタイムライン: 胡桃は E → 通常1段+重撃 → 最後に爆発、同じパターンはまとめる', () => {
+  const e = engineFor(huBuild);
+  const rec = recommendCombo(e);
+  assert.ok(rec.timeline[0].label.startsWith('元素スキル'));
+  assert.ok(rec.timeline[rec.timeline.length - 1].label.startsWith('元素爆発'));
+  const attacks = rec.timeline.filter((s) => s.kind === 'attack');
+  assert.equal(attacks.length, 1);
+  assert.match(attacks[0].label, /×\d+/);
+  for (let i = 1; i < rec.timeline.length; i++) assert.ok(rec.timeline[i].start >= rec.timeline[i - 1].start);
+});
+
+test('fieldBudget を超えない', () => {
+  for (const build of [huBuild, raidenBuild]) {
+    const e = engineFor(build);
+    const rec = recommendCombo(e, { role: 'main', fieldBudget: 8 });
+    const r = evaluateCombo(e, { ...rec.combo, duration: null });
+    assert.ok(r.totalTime <= 8 + 1.7, `${build.nameJa}: ${r.totalTime}`); // 爆発・スキル1回分の超過は許容
+  }
+});
