@@ -23,6 +23,22 @@ jobs:
           node-version: 22
       - run: npm test
 
+  cors-probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          for u in https://enka.network/api/uid/618285856/ https://enka.network/api/uid/618285856/?info; do
+            echo "=== GET $u"
+            curl -sS -m 30 -A "Mozilla/5.0" -H "Origin: https://mizugamiaqua.github.io" -D - -o body.json "$u" | sed -n '1,40p'
+            head -c 300 body.json; echo
+            echo "=== OPTIONS $u"
+            curl -sS -m 30 -X OPTIONS -H "Origin: https://mizugamiaqua.github.io" -H "Access-Control-Request-Method: GET" -D - -o /dev/null "$u" | sed -n '1,30p'
+          done
+          echo "=== raw.githubusercontent CORS"
+          curl -sS -I -H "Origin: https://example.com" https://raw.githubusercontent.com/mizugamiaqua/GenshinDPS/claude/blissful-volta-bj0yaz/README.md | grep -i -E "access-control|cache-control|HTTP/"
+          echo "=== api.github.com CORS"
+          curl -sS -I -H "Origin: https://example.com" https://api.github.com/repos/mizugamiaqua/GenshinDPS/contents/README.md | grep -i -E "access-control|cache-control|HTTP/|ratelimit"
+
   deploy:
     needs: test
     # デフォルトブランチへの push（または手動実行）の時だけデプロイ
