@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          for u in https://enka.network/api/uid/618285856/ https://enka.network/api/uid/618285856/?info; do
+          for u in https://enka.network/api/uid/618285856 https://enka.network/api/uid/618285856?info https://enka.network/api/uid/100000001; do
             echo "=== GET $u"
             curl -sS -m 30 -A "Mozilla/5.0" -H "Origin: https://mizugamiaqua.github.io" -D - -o body.json "$u" | sed -n '1,40p'
             head -c 300 body.json; echo
