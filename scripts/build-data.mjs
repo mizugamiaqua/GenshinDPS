@@ -3,6 +3,8 @@
 // 入力:
 //   - genshin-db（npm, devDependency）: 天賦倍率・日本語名
 //   - Enka.Network store（GitHub）: avatarId とスキルIDの対応、名前ローカライズ
+//     新形式 store/gi/avatars.json・locs.json を優先し、旧形式 characters.json・loc.json で補う
+//   - Enka store に未登録の新キャラも genshin-db にあれば収録する（スキルIDは実行時に推定）
 // 出力:
 //   - public/data/characters.json
 //   - public/data/loc.json
@@ -35,7 +37,7 @@ const TRAVELER_SUFFIX = {
 };
 
 async function fetchStore(file) {
-  const cached = join(CACHE, file);
+  const cached = join(CACHE, file.replaceAll('/', '_'));
   if (existsSync(cached) && !process.argv.includes('--refresh')) {
     return JSON.parse(await readFile(cached, 'utf8'));
   }
@@ -58,9 +60,20 @@ function talentsFor(name) {
   };
 }
 
+/** 新形式のアイコン表記 "/ui/UI_AvatarIcon_Side_X.png" → "UI_AvatarIcon_Side_X" */
+const iconName = (v) => (v ? String(v).replace(/^\/ui\//, '').replace(/\.png$/, '') : null);
+
 async function main() {
-  const enkaChars = await fetchStore('characters.json');
-  const loc = await fetchStore('loc.json');
+  // 新形式を優先し、旧形式にしか無いエントリで補完
+  const legacyChars = await fetchStore('characters.json');
+  const newChars = await fetchStore('gi/avatars.json');
+  const enkaChars = { ...legacyChars, ...newChars };
+  const legacyLoc = await fetchStore('loc.json');
+  const newLoc = await fetchStore('gi/locs.json');
+  const loc = {
+    ja: { ...legacyLoc.ja, ...newLoc.ja },
+    en: { ...legacyLoc.en, ...newLoc.en },
+  };
 
   // genshin-db のキャラクターを avatarId で引けるようにする
   const byId = new Map();
@@ -100,11 +113,35 @@ async function main() {
       element,
       weaponType: ec.WeaponType ?? g.en.weaponType,
       rarity: g.en.rarity,
-      icon: ec.SideIconName ?? null,
+      icon: iconName(ec.SideIconName),
       skillOrder: ec.SkillOrder,
       proudMap: ec.ProudMap ?? {},
       talents,
     };
+  }
+
+  // Enka store に未登録の新キャラ（genshin-db には存在）も収録する。
+  // スキルID（skillOrder）が不明なので、実行時に skillLevelMap のID順から推定する
+  const covered = new Set(Object.values(out).map((c) => c.avatarId));
+  const added = [];
+  for (const [avatarId, g] of byId) {
+    if (covered.has(avatarId) || avatarId === 10000005 || avatarId === 10000007) continue;
+    const talents = talentsFor(g.en.name);
+    if (!talents || !GDB_ELEMENT[g.en.elementType]) continue;
+    out[String(avatarId)] = {
+      avatarId,
+      key: g.en.name,
+      nameJa: g.ja?.name ?? g.en.name,
+      nameEn: g.en.name,
+      element: GDB_ELEMENT[g.en.elementType],
+      weaponType: g.en.weaponType,
+      rarity: g.en.rarity,
+      icon: g.en.images?.filename_sideIcon ?? null,
+      skillOrder: null,
+      proudMap: {},
+      talents,
+    };
+    added.push(g.en.name);
   }
 
   // ローカライズは日本語・英語だけに絞る
@@ -134,6 +171,7 @@ async function main() {
     0,
   );
   console.log(`characters: ${Object.keys(out).length} (damage rows: ${rowCount})`);
+  if (added.length) console.log(`added from genshin-db only: ${added.join(', ')}`);
   if (skipped.length) console.log(`skipped (no data): ${skipped.join(', ')}`);
 }
 

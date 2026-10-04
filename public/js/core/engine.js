@@ -49,15 +49,18 @@ function makeCtx(charData, build, settings) {
 }
 
 /** 表示・計算対象となるバフ定義の一覧（グループ付き） */
-export function listBuffs(charData, build, ctx) {
+export function listBuffs(charData, build, ctx, { manualTeamBuffs = true } = {}) {
   const profile = profileFor(charData);
   const groups = [];
   for (const def of profile?.buffs ?? []) {
     if (def.available && !def.available(ctx)) continue;
+    // 他メンバーを強化する効果は、チーム編成時はチームバフ側で扱う
+    if (def.soloOnly && !manualTeamBuffs) continue;
     groups.push({ def, group: 'profile', fallbackOn: true });
   }
   for (const def of activeSetBuffs(build, ctx)) groups.push({ def, group: 'set', fallbackOn: true });
-  for (const def of TEAM_BUFFS) groups.push({ def, group: 'team', fallbackOn: false });
+  // チーム編成モードでは、手入力のチームバフの代わりに実際のメンバーから計算したバフを使う
+  if (manualTeamBuffs) for (const def of TEAM_BUFFS) groups.push({ def, group: 'team', fallbackOn: false });
   groups.push({ def: CUSTOM_BUFF, group: 'custom', fallbackOn: true });
   return groups;
 }
@@ -67,15 +70,19 @@ export function listBuffs(charData, build, ctx) {
  * @param {object} charData characters.json の1キャラ
  * @param {object} build 正規化済みビルド（enka.js の parseAvatar の結果）
  * @param {object} rawSettings ユーザー設定
+ * @param {{teamBuffs?:Array<{def:object, params:object}>}} opts
+ *   teamBuffs チームメイトから受けるバフ（指定時は手入力のチームバフ一覧を使わない）
  */
-export function createEngine(charData, build, rawSettings) {
+export function createEngine(charData, build, rawSettings, opts = {}) {
   const settings = normalizeSettings(rawSettings);
   const ctx = makeCtx(charData, build, settings);
-  const buffList = listBuffs(charData, build, ctx).map((b) => ({
+  const teamMode = Array.isArray(opts.teamBuffs);
+  const buffList = listBuffs(charData, build, ctx, { manualTeamBuffs: !teamMode }).map((b) => ({
     ...b,
     on: isBuffOn(b.def, settings.buffs, b.fallbackOn),
     params: resolveParams(b.def, settings.buffs[b.def.id]?.params),
   }));
+  for (const tb of opts.teamBuffs ?? []) buffList.push({ def: tb.def, group: 'teamlink', on: true, params: tb.params ?? {} });
   const enabled = buffList.filter((b) => b.on);
 
   // 1) 静的効果 → 2) ステータス確定後の動的効果（変換系）

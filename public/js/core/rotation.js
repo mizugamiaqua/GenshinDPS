@@ -127,7 +127,10 @@ function durationOf(engine, talent) {
  *   3. 特殊状態（雷電の夢想の一心など）があればその間の攻撃パターンを最適化
  *   4. 残り時間を「通常N段＋重撃」の中で最もDPS効率が高いパターンで埋める
  * @param {object} engine
- * @param {{rotationLength?:number}} opts
+ * @param {{rotationLength?:number, fillNormal?:boolean, fieldBudget?:number}} opts
+ *   fillNormal  残り時間を通常攻撃で埋めるか（未指定ならプロファイルに従う）
+ *   fieldBudget このキャラが使えるフィールド時間（チーム編成時）
+ *   fillState   特殊状態中の攻撃を入れるか（チームのサポート役は false）
  */
 export function recommendCombo(engine, opts = {}) {
   const { charData, actions } = engine;
@@ -249,8 +252,9 @@ export function recommendCombo(engine, opts = {}) {
     }
   };
 
-  if (stateTalent) {
-    const D = profile.stateDuration ?? durationOf(engine, stateTalent) ?? 7;
+  if (stateTalent && opts.fillState !== false) {
+    const D0 = profile.stateDuration ?? durationOf(engine, stateTalent) ?? 7;
+    const D = opts.fieldBudget != null ? Math.min(D0, Math.max(0, opts.fieldBudget - used)) : D0;
     const chainRows = actions.filter((a) => a.talent === stateTalent && a.kind === 'chain');
     const chargedRows = actions.filter((a) => a.talent === stateTalent && a.kind === 'charged');
     if (chainRows.length) {
@@ -260,9 +264,11 @@ export function recommendCombo(engine, opts = {}) {
   }
 
   // --- 4. 残り時間を通常攻撃で埋める ---
-  const fillNormal = profile.fillNormal ?? true;
+  const fillNormal = opts.fillNormal ?? profile.fillNormal ?? true;
   if (fillNormal) {
-    const rest = profile.fillDuration ?? Math.max(0, L - used);
+    // チーム編成時は、他メンバーが使う時間を除いたフィールド時間（fieldBudget）の範囲で埋める
+    const budget = opts.fieldBudget != null ? Math.max(0, opts.fieldBudget - used) : Math.max(0, L - used);
+    const rest = profile.fillDuration != null ? Math.min(profile.fillDuration, budget) : budget;
     const chainRows = actions.filter((a) => a.talent === 'normal' && a.kind === 'chain');
     const chargedRows = actions.filter((a) => a.talent === 'normal' && a.kind === 'charged');
     fill(rest, chainRows, chargedRows, '通常攻撃');

@@ -2,7 +2,7 @@
 const KEY = 'genshin-dps:v1';
 
 function empty() {
-  return { characters: {}, settings: {}, combos: {}, lastUid: '' };
+  return { characters: {}, settings: {}, combos: {}, teams: {}, lastUid: '' };
 }
 
 function load() {
@@ -68,6 +68,25 @@ export const store = {
   },
   saveCombos(id, combos) {
     state.combos[id] = combos;
+    save();
+  },
+  listTeams() {
+    return Object.entries(state.teams ?? {})
+      .map(([id, team]) => ({ id, team }))
+      .sort((a, b) => (b.team.updatedAt ?? '').localeCompare(a.team.updatedAt ?? ''));
+  },
+  getTeam(id) {
+    return state.teams?.[id] ?? null;
+  },
+  saveTeam(id, team) {
+    state.teams ??= {};
+    const key = id ?? `team-${Date.now().toString(36)}`;
+    state.teams[key] = { ...team, updatedAt: new Date().toISOString() };
+    save();
+    return key;
+  },
+  removeTeam(id) {
+    delete state.teams?.[id];
     save();
   },
   exportAll() {

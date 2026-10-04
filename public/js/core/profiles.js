@@ -172,7 +172,7 @@ export const PROFILES = {
 
   Yelan: {
     buffs: [
-      { id: 'profile:yelan:a4', label: '固有天賦「妙転時来」: 与ダメージアップ（平均）',
+      { id: 'profile:yelan:a4', label: '固有天賦「妙転時来」: 与ダメージアップ（平均）', soloOnly: true,
         params: [number('bonus', '平均与ダメージ(%)', 25, { min: 0, max: 50, step: 1 })],
         effects: (p) => ({ dmg: p.bonus / 100 }) },
     ],
@@ -184,6 +184,54 @@ export const PROFILES = {
     notes: ['夜蘭は控えで玄擲玲瓏による協同攻撃を行うサブアタッカーとして、20秒ローテーションで評価しています。'],
   },
 };
+
+// 控えで設置物・協同攻撃などのダメージを出すサポート/サブアタッカー（20秒ローテーションあたりの目安ヒット数）
+// 詳細プロファイルが無いキャラ向けの簡易定義。fillNormal: false（通常攻撃で時間を埋めない）として扱う
+const SUPPORTS = {
+  Xingqiu: { 'Sword Rain DMG': 30 },
+  Fischl: { "Oz's ATK DMG": 10 },
+  Albedo: { 'Transient Blossom DMG': 10, 'Fatal Blossom DMG': 7 },
+  Zhongli: { 'Stone Stele/Resonance DMG': 8 },
+  'Kuki Shinobu': { 'Grass Ring of Sanctification DMG': 8 },
+  'Yae Miko': { 'Sesshou Sakura DMG: Level 3': 14, 'Tenko Thunderbolt DMG': 3 },
+  Beidou: { 'Lightning DMG': 12 },
+  Rosaria: { 'Ice Lance DoT': 4 },
+  'Kaedehara Kazuha': { DoT: 4, 'Additional Elemental DMG': 4 },
+  Sucrose: { DoT: 4, 'Additional Elemental DMG': 4 },
+  Furina: { 'Gentilhomme Usher DMG': 7, 'Surintendante Chevalmarin DMG': 12, 'Mademoiselle Crabaletta DMG': 3 },
+  Mona: { DoT: 4 },
+  Columbina: { 'Gravity Ripple: Continuous DMG': 10 },
+  Citlali: { 'Frostfall Storm DMG': 10, 'Spiritvessel Skull DMG': 3 },
+  Emilie: { 'Level 2 Lumidouce Case Attack DMG': 12 },
+  Chiori: { 'Tamoto DMG': 12 },
+  Layla: { 'Shooting Star DMG': 12 },
+  Dehya: { 'Field DMG': 8 },
+  'Sangonomiya Kokomi': { 'Ripple DMG': 6 },
+  Ineffa: { 'Birgitta Discharge DMG': 10 },
+  Escoffier: { 'Frosty Parfait DMG': 10 },
+  Shenhe: { DoT: 6 },
+  Thoma: { 'Fiery Collapse DMG': 6 },
+  Bennett: {},
+  Xilonen: {},
+  Chevreuse: {},
+  Faruzan: {},
+  Lauma: { 'Frostgrove Sanctuary Attack DMG': 10 },
+  Collei: { 'Leap DMG': 6 },
+  Nilou: { 'Lingering Aeon DMG': 1 },
+};
+
+for (const [key, hits] of Object.entries(SUPPORTS)) {
+  if (PROFILES[key]) continue;
+  PROFILES[key] = {
+    hitCounts: () => hits,
+    skillCasts: 1,
+    fillNormal: false,
+    rotationLength: 20,
+    support: true,
+    notes: [`${key} は控えから設置物・協同攻撃で戦うサポートとして、20秒ローテーションあたりのヒット数（目安）で計算しています。`],
+  };
+}
+for (const key of ['Xiangling', 'Nahida', 'Yelan']) PROFILES[key].support = true;
 
 export function profileFor(charData) {
   return PROFILES[charData?.key] ?? null;

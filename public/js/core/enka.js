@@ -103,6 +103,26 @@ export function countSets(artifacts) {
   return sets;
 }
 
+/**
+ * Enka の辞書に未登録の新キャラ用: スキルIDの並び（通常攻撃 < 元素スキル < 元素爆発）から順序を推定
+ * 4つある場合（代替ダッシュ持ち）は 1番目・2番目・最後 を使う
+ */
+export function guessSkillOrder(skillLevelMap = {}) {
+  const ids = Object.keys(skillLevelMap).map(Number).sort((a, b) => a - b);
+  if (ids.length <= 3) return ids;
+  return [ids[0], ids[1], ids[ids.length - 1]];
+}
+
+/** 命ノ星座による追加レベル: 天賦グループIDの末尾（1=通常攻撃, 2=元素スキル, 9=元素爆発）で判定 */
+export function guessExtraLevels(extraMap = {}) {
+  const out = { normal: 0, skill: 0, burst: 0 };
+  for (const [id, lv] of Object.entries(extraMap)) {
+    const t = { 1: 'normal', 2: 'skill', 9: 'burst' }[Number(id) % 10];
+    if (t) out[t] += num(lv);
+  }
+  return out;
+}
+
 function resolveCharKey(info, characters) {
   const withDepot = `${info.avatarId}-${info.skillDepotId}`;
   if (characters[withDepot]) return withDepot;
@@ -131,11 +151,13 @@ export function parseAvatar(info, db, uid = null) {
   const talentLevels = {};
   const talentBase = {};
   if (charData) {
+    const order = charData.skillOrder ?? guessSkillOrder(info.skillLevelMap);
+    const extras = charData.skillOrder ? null : guessExtraLevels(info.proudSkillExtraLevelMap);
     ['normal', 'skill', 'burst'].forEach((t, i) => {
-      const skillId = charData.skillOrder[i];
+      const skillId = order[i];
       const base = num(info.skillLevelMap?.[skillId]) || 1;
       const proud = charData.proudMap?.[skillId];
-      const extra = proud != null ? num(info.proudSkillExtraLevelMap?.[proud]) : 0;
+      const extra = extras ? extras[t] : proud != null ? num(info.proudSkillExtraLevelMap?.[proud]) : 0;
       talentBase[t] = base;
       talentLevels[t] = Math.min(15, base + extra);
     });

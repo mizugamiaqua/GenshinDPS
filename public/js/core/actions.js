@@ -4,7 +4,7 @@ import { ACTION_TIMING, WEAPON_TIMING } from './constants.js';
 import { ELEMENT_OVERRIDES, hasInfusion } from './profiles.js';
 
 export const PRESS_RE = /\b(Press|Tap|Short)\b/i;
-export const HOLD_RE = /\b(Hold|Long)\b/i;
+export const HOLD_RE = /\b(Hold|Long)\b|^Charge Level/i;
 const CHAIN_RE = /(\d+)-Hit\b/i;
 
 /** 行の種類: chain(通常攻撃の段) / charged / plunge / press / hold / other */
@@ -92,12 +92,14 @@ export function buildActions(charData, opts = {}) {
         baseNameEn: row.nameEn.replace(/ \[.*\]$/, ''),
         rowIndex: Number(row.id.split(':')[1]),
         defaultTime: defaultTime(row, kind, charData, isFirst),
+        special: row.special ?? null,
         hits: row.hits.map((h) => ({
           stat: h.stat,
           count: h.count,
           mult: h.values[Math.min(h.values.length, Math.max(1, lv)) - 1],
           element: hitElement(row, h, charData, infusion),
           category: row.category,
+          special: row.special ?? null,
         })),
       });
     }

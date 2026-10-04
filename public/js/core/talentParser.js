@@ -17,7 +17,10 @@ const ELEMENT_WORDS = {
 };
 
 // ダメージ行ではない（バフ量・時間・間隔など）ものを除外するためのキーワード
-const NON_DAMAGE_NAME = /(Bonus|Increase|Interval|Reduction|Absorption|Conversion|Decrease|Reduce|\bRES\b|Ratio|Limit|Threshold|Duration|Cap\b|Stamina|Healing|Regenerat|Restored|Cost|Gain|Consumption|Lunar)/i;
+const NON_DAMAGE_NAME = /(Bonus|Increase|Interval|Reduction|Absorption|Conversion|Decrease|Reduce|\bRES\b|Ratio|Limit|Threshold|Duration|Cap\b|Stamina|Healing|Regenerat|Restored|Cost|Gain|Consumption)/i;
+
+// 月反応・星反応として扱われるダメージ（通常のダメージ式とは異なるため概算扱い）
+export const REACTION_DAMAGE_NAME = /(Lunar-(Charged|Bloom|Crystallize)|Stellar[- ](Conduct|Swirl|Glimmer))/i;
 
 // ダメージ行とみなす名前（"DMG" を含まない攻撃行もある）
 const DAMAGE_NAME = /(DMG|^Charged Attack|Aimed Shot|^Fully-Charged|DoT$|^Riptide Slash$|^Blazing Threshold$|^Scorching Threshold$)/i;
@@ -202,8 +205,11 @@ export function parseTalent(talentKey, en, ja) {
     const sufJa = variantSuffixes(nameJa, parsed.variants.length);
     parsed.variants.forEach((hits, vi) => {
       const single = parsed.variants.length === 1;
+      const variantName = single ? nameEn : sufEn[vi];
+      const special = REACTION_DAMAGE_NAME.exec(variantName.includes('Stellar') || variantName.includes('Lunar') ? variantName : nameEn);
       rows.push({
         id: `${talentKey}:${idx}:${vi}`,
+        ...(special ? { special: /Lunar/i.test(special[0]) ? 'lunar' : 'stellar' } : {}),
         talent: talentKey,
         category,
         nameEn: single ? nameEn : `${nameEn} [${sufEn[vi]}]`,

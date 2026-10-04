@@ -26,7 +26,10 @@ function append(el, children) {
 export const $ = (sel, root = document) => root.querySelector(sel);
 
 export function clear(el) {
-  while (el.firstChild) el.removeChild(el.firstChild);
+  // フォーカス中の入力欄を先に外す（削除時の blur→change で再描画が入れ子になるのを防ぐ）
+  const active = document.activeElement;
+  if (active && el.contains(active)) active.blur();
+  el.replaceChildren();
   return el;
 }
 

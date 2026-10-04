@@ -84,11 +84,15 @@ export function calcHit(hit, env) {
   const cat = hit.category;
   const statValue = stats[hit.stat] ?? 0;
   const mult = (hit.mult + (rm.multAdd ?? 0)) * (rm.multScale ?? 1);
-  const flat = m(mods, `flat.${cat}`) + m(mods, `flat.${el}`) + m(mods, 'flat.all');
-  const bonus = 1 + m(mods, 'dmg') + (stats.dmg[el] ?? 0) + m(mods, `dmg.${cat}`) + (rm.dmg ?? 0);
+  // 月反応・星反応ダメージ（概算）: 防御無視・通常のダメージバフは乗らず、専用バフ（dmg.lunar など）のみ
+  const special = hit.special ?? null;
+  const flat = special ? 0 : m(mods, `flat.${cat}`) + m(mods, `flat.${el}`) + m(mods, 'flat.all');
+  const bonus = special
+    ? 1 + m(mods, `dmg.${special}`) + (rm.dmg ?? 0)
+    : 1 + m(mods, 'dmg') + (stats.dmg[el] ?? 0) + m(mods, `dmg.${cat}`) + (rm.dmg ?? 0);
   const cr = Math.min(1, Math.max(0, stats.cr + m(mods, `cr.${cat}`) + (rm.cr ?? 0)));
   const cd = stats.cd + m(mods, `cd.${cat}`) + (rm.cd ?? 0);
-  const defMult = defMultiplier(level, enemy.level, m(mods, 'defRed'), m(mods, 'defIgnore') + (rm.defIgnore ?? 0));
+  const defMult = special ? 1 : defMultiplier(level, enemy.level, m(mods, 'defRed'), m(mods, 'defIgnore') + (rm.defIgnore ?? 0));
   const resMult = resMultiplier(enemyRes(enemy, mods, el));
 
   const calc = (reactionType) => {
@@ -103,7 +107,7 @@ export function calcHit(hit, env) {
   const plain = calc(null);
   let result = plain;
   let reacted = false;
-  if (type !== 'none' && reactionApplies(type, el) && rate > 0) {
+  if (!special && type !== 'none' && reactionApplies(type, el) && rate > 0) {
     const r = calc(type);
     reacted = true;
     // 反応率に応じた期待値（非会心・会心は反応時の値を表示）

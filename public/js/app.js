@@ -6,6 +6,7 @@ import { createEngine, normalizeSettings } from './core/engine.js';
 import { evaluateCombo, recommendCombo } from './core/rotation.js';
 import { REACTIONS, reactionApplies } from './core/damage.js';
 import { CATEGORY_JA, ELEMENT_JA, PERCENT_STATS, SLOT_JA, STAT_JA, WEAPON_JA } from './core/constants.js';
+import { initTeamView, renderTeamView } from './teamView.js';
 
 const db = { characters: null, loc: null, meta: null };
 const ui = {
@@ -31,6 +32,7 @@ async function init() {
       })),
     );
     Object.assign(db, { characters, loc, meta });
+    initTeamView({ db });
   } catch (err) {
     document.getElementById('app').prepend(h('div', { class: 'alert alert-error' },
       `データの読み込みに失敗しました: ${err.message}`));
@@ -59,7 +61,7 @@ function currentCalcId() {
 
 function route() {
   const [, view = 'import', arg] = location.hash.match(/^#\/([^/]+)(?:\/(.+))?$/) ?? [];
-  for (const v of ['import', 'roster', 'calc']) {
+  for (const v of ['import', 'roster', 'calc', 'team']) {
     document.getElementById(`view-${v}`).hidden = v !== view;
   }
   for (const tab of document.querySelectorAll('.tab')) {
@@ -68,6 +70,7 @@ function route() {
   }
   if (view === 'import') renderImport();
   else if (view === 'roster') renderRoster();
+  else if (view === 'team') renderTeamView();
   else if (view === 'calc') {
     if (arg) ui.lastCalcId = decodeURIComponent(arg);
     ui.recommendation = null;
@@ -674,7 +677,7 @@ function comboPanel(st, r) {
           : h('tr', {},
             h('td', {},
               h('div', { class: 'action-name' }, line.action.nameJa),
-              h('div', { class: 'muted small' }, line.action.talent ? TALENT_JA[line.action.talent] : '',
+              h('div', { class: 'muted small' }, line.action.talent ? TALENT_JA[line.action.talent] : '', line.action.special ? '・反応ダメージ（概算）' : '',
                 line.action.hits.length ? ' ・ ' : '', [...new Set(line.action.hits.map((x) => ELEMENT_JA[x.element]))].join('/'))),
             h('td', {}, line.action.hits.length
               ? h('select', { onchange: (e) => updateCombo(id, (c) => { c.entries[i].reaction = e.target.value; }) }, reactionOptions(line.action, line.entry.reaction))
@@ -789,7 +792,7 @@ function actionPanel(st) {
             });
           },
         },
-        h('span', { class: 'action-name' }, a.nameJa),
+        h('span', { class: 'action-name' }, a.nameJa, a.special ? h('small', { class: 'approx', title: '月反応・星反応ダメージは防御無視・専用バフのみの概算です' }, ' 概算') : null),
         h('span', { class: 'action-meta' },
           a.hits.length ? [...new Set(a.hits.map((x) => x.element))].map(elementBadge) : null,
           a.hits.length ? h('span', { class: 'num' }, fmt(d.avg)) : h('span', { class: 'muted' }, sec(a.defaultTime))));
